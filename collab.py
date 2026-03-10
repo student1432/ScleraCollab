@@ -273,8 +273,15 @@ def health_check():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.utcnow().isoformat(),
-        'redis_available': collab_cache.probe()
+        'redis_available': collab_cache.probe(),
+        'ai_available': collab_utils.AI_AVAILABLE
     }), 200
+
+
+@app.route('/ping')
+def ping():
+    """Simple ping endpoint to test basic connectivity"""
+    return 'pong', 200
 
 
 @app.route('/')

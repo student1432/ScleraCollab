@@ -63,23 +63,73 @@ def _connect() -> Optional[object]:
         import redis as redis_lib
         url = os.environ.get('REDIS_URL')
         if url:
-            # Handle Render Redis URL format
-            if not url.startswith(('redis://', 'rediss://')):
-                # If it's just a hostname or incomplete URL, construct proper Redis URL
-                if ':' in url and not url.startswith('redis://'):
+            print(f"Original REDIS_URL: {url}")
+            
+            # Handle different Redis URL formats
+            if url.startswith(('redis://', 'rediss://')):
+                # URL is already in correct format, try as-is first
+                try:
+                    print(f"Attempting Redis connection to: {url}")
+                    client = redis_lib.from_url(
+                        url,
+                        decode_responses=True,
+                        socket_connect_timeout=5,
+                        socket_timeout=5,
+                    )
+                    client.ping()
+                    print("✅ Redis connected with original URL")
+                except Exception as original_error:
+                    print(f"Original URL failed: {original_error}")
+                    # Try to fix common URL issues
+                    if ':@' in url or (url.count(':') >= 3 and '@' not in url):
+                        # URL has malformed auth section like 'rediss://:host:port'
+                        # Extract just the host:port part
+                        parts = url.split('://')
+                        if len(parts) == 2:
+                            protocol = parts[0]
+                            rest = parts[1]
+                            # Remove leading : if present
+                            if rest.startswith(':'):
+                                rest = rest[1:]
+                            # Remove any auth info before @
+                            if '@' in rest:
+                                rest = rest.split('@')[1]
+                            # Remove query params
+                            rest = rest.split('?')[0]
+                            fixed_url = f"{protocol}://{rest}"
+                            print(f"Trying fixed URL: {fixed_url}")
+                            try:
+                                client = redis_lib.from_url(
+                                    fixed_url,
+                                    decode_responses=True,
+                                    socket_connect_timeout=5,
+                                    socket_timeout=5,
+                                )
+                                client.ping()
+                                print("✅ Redis connected with fixed URL")
+                            except Exception as fix_error:
+                                print(f"Fixed URL also failed: {fix_error}")
+                                raise fix_error
+                    else:
+                        raise original_error
+            else:
+                # URL doesn't start with redis:// or rediss://, construct it
+                if ':' in url:
                     # Format like 'hostname:port'
                     url = f'redis://{url}'
                 else:
                     # Just hostname or service name
                     url = f'redis://{url}:6379'
-            
-            print(f"Attempting Redis connection to: {url}")
-            client = redis_lib.from_url(
-                url,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-            )
+                
+                print(f"Constructed Redis URL: {url}")
+                client = redis_lib.from_url(
+                    url,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=5,
+                )
+                client.ping()
+                print("✅ Redis connected with constructed URL")
         else:
             host = os.environ.get('REDIS_HOST', 'localhost')
             port = int(os.environ.get('REDIS_PORT', 6379))
@@ -89,7 +139,8 @@ def _connect() -> Optional[object]:
                 socket_connect_timeout=5,
                 socket_timeout=5,
             )
-        client.ping()          # single ping at connection time only
+            client.ping()
+            print("✅ Redis connected")
         _redis          = client
         _last_fail_time = None
         logger.info('✅ Redis connected')

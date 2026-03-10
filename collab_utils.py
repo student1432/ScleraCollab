@@ -79,8 +79,8 @@ _model = None
 _embeddings_cache = {}
 _cache_expiry = {}
 
-def get_model():
-    """Get or initialize sentence transformer model"""
+def _get_model():
+    """Lazy-load the AI model only when needed"""
     global _model
     if _model is None and AI_AVAILABLE:
         try:
@@ -92,10 +92,12 @@ def get_model():
             print("✅ AI Model loaded: all-MiniLM-L6-v2")
         except Exception as e:
             print(f"❌ Failed to load AI model: {e}")
-            print("⚠️  Continuing without AI features...")
-            _model = None
+            AI_AVAILABLE = False
     return _model
 
+def get_model():
+    """Get or initialize sentence transformer model"""
+    return _get_model()
 
 def get_label_embeddings():
     """Return pre-encoded embeddings for STUDENT_TOPIC_LABELS (computed once).
