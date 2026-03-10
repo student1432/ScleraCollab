@@ -153,12 +153,12 @@ def _firebase_sign_up(email: str, password: str) -> dict:
     return data
 
 
-def get_collab_profile(uid: str) -> dict | None:
+def get_collab_profile(uid: str) -> Optional[dict]:
     doc = db.collection('collab_users').document(uid).get()
     return doc.to_dict() if doc.exists else None
 
 
-def get_sclera_user_by_email(email: str) -> dict | None:
+def get_sclera_user_by_email(email: str) -> Optional[dict]:
     """Check if user exists in original Sclera users collection"""
     try:
         users_ref = db.collection('users')

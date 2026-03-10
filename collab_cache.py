@@ -21,6 +21,7 @@ import os
 import json
 import time
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ _last_fail_time  = None       # monotonic timestamp of last connection failure
 _RETRY_COOLDOWN  = 30         # seconds to wait before retrying after a failure
 
 
-def _connect() -> object | None:
+def _connect() -> Optional[object]:
     """Attempt to create and ping a Redis connection.
 
     Cooldown design: after any failure we set _last_fail_time and refuse
@@ -89,7 +90,7 @@ def _connect() -> object | None:
     return _redis
 
 
-def _client() -> object | None:
+def _client() -> Optional[object]:
     """Return live Redis client or None — no per-call ping."""
     return _connect()
 
@@ -175,7 +176,7 @@ def cache_delete_pattern(pattern: str) -> int:
 
 # ── Domain-specific helpers ───────────────────────────────────────────────────
 
-def get_feed_cache(uid: str, cursor: str = '') -> dict | None:
+def get_feed_cache(uid: str, cursor: str = '') -> Optional[dict]:
     return cache_get(_feed_key(uid, cursor))
 
 
@@ -199,7 +200,7 @@ def invalidate_feed_for_connections(uid: str, connected_uids: list):
         invalidate_user_feed_cache(cuid)
 
 
-def get_post_analysis_cache(post_id: str) -> dict | None:
+def get_post_analysis_cache(post_id: str) -> Optional[dict]:
     return cache_get(_analysis_key(post_id))
 
 
@@ -210,7 +211,7 @@ def set_post_analysis_cache(post_id: str, analysis: dict) -> bool:
     return cache_set(_analysis_key(post_id), slim, POST_ANALYSIS_TTL)
 
 
-def get_user_profile_cache(uid: str) -> dict | None:
+def get_user_profile_cache(uid: str) -> Optional[dict]:
     return cache_get(_profile_key(uid))
 
 
@@ -224,7 +225,7 @@ def invalidate_user_profile_cache(uid: str):
     cache_delete(_profile_key(uid))
 
 
-def get_trending_cache() -> list | None:
+def get_trending_cache() -> Optional[list]:
     return cache_get(_trending_key())
 
 

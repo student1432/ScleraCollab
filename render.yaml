@@ -5,7 +5,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class threads -w 1 --bind 0.0.0.0:$PORT collab:app
+    startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT collab:app
     healthCheck:
       enabled: true
       path: /favicon.ico
@@ -16,7 +16,7 @@ services:
       - key: FLASK_ENV
         value: production
       - key: PYTHON_VERSION
-        value: 3.9
+        value: 3.9.16
       - key: SECRET_KEY
         generateValue: true
       - key: FIREBASE_WEB_API_KEY
@@ -29,5 +29,6 @@ services:
   - type: redis
     name: sclera-collab-redis
     plan: free
-    ipAllowList: []
-    maxmemoryPolicy: allkeys-lru
+    envVars:
+      - key: REDIS_URL
+        value: rediss://:funky-oarfish-66348.upstash.io:6380
