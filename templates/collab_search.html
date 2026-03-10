@@ -1,0 +1,606 @@
+{% extends "collab_base.html" %}
+
+{% block title %}Search - ScleraCollab{% endblock %}
+
+{% block head %}
+<script>
+const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-white mb-2">Search</h1>
+    <p class="text-gray-400">Find people, posts, and content across ScleraCollab</p>
+  </div>
+
+  <!-- Search Form -->
+  <div class="island p-6 mb-6">
+    <form onsubmit="performSearch(event)" class="space-y-4">
+      <div class="flex flex-col lg:flex-row gap-4">
+        <div class="flex-1">
+          <input type="text" 
+                 id="searchQuery" 
+                 value="{{ query or '' }}"
+                 placeholder="Search for people, posts, topics..." 
+                 class="w-full bg-[#2a2a2a] text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none placeholder-gray-500">
+        </div>
+        <div class="flex items-center space-x-2">
+          <select id="searchType" class="bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+            <option value="all" {% if search_type == 'all' %}selected{% endif %}>All</option>
+            <option value="people" {% if search_type == 'people' %}selected{% endif %}>People</option>
+            <option value="posts" {% if search_type == 'posts' %}selected{% endif %}>Posts</option>
+          </select>
+          <button type="submit" class="px-6 py-3 bg-[#22c55e] hover:bg-[#2ea844] text-white rounded-lg transition-colors flex items-center justify-center space-x-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+            <span>Search</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- Advanced Filters for People -->
+      <div id="peopleFilters" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 {% if search_type == 'posts' %}hidden{% endif %}">
+        <div>
+          <label class="block text-gray-400 text-sm mb-2">School/Institution</label>
+          <input type="text" 
+                 id="schoolFilter" 
+                 value="{{ school_filter or '' }}"
+                 placeholder="e.g., MIT, Stanford..." 
+                 class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none placeholder-gray-500">
+        </div>
+        
+        <div>
+          <label class="block text-gray-400 text-sm mb-2">Skills</label>
+          <input type="text" 
+                 id="skillFilter" 
+                 value="{{ skill_filter or '' }}"
+                 placeholder="e.g., Python, Design..." 
+                 class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none placeholder-gray-500">
+        </div>
+        
+        <div>
+          <label class="block text-gray-400 text-sm mb-2">Connection Type</label>
+          <select id="connectionFilter" class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+            <option value="">All People</option>
+            <option value="connected">Connected</option>
+            <option value="not_connected">Not Connected</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- Quick Filters -->
+      <div class="flex flex-wrap gap-2">
+        <span class="text-gray-400 text-sm">Quick filters:</span>
+        <button type="button" onclick="setQuickFilter('school')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-xs rounded-full transition-colors">
+          Same School
+        </button>
+        <button type="button" onclick="setQuickFilter('skills')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-xs rounded-full transition-colors">
+          Shared Skills
+        </button>
+        <button type="button" onclick="setQuickFilter('mentors')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-xs rounded-full transition-colors">
+          Find Mentors
+        </button>
+        <button type="button" onclick="clearFilters()" class="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded-full transition-colors">
+          Clear All
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Search Type Toggle -->
+  {% if query %}
+    <div class="flex space-x-1 mb-6 bg-[#1a1a1a] rounded-xl p-1">
+      <button onclick="showResults('all')" id="tab-all" class="tab-btn flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 {% if search_type == 'all' %}bg-[#22c55e] text-white{% else %}text-gray-400 hover:text-white{% endif %}">
+        All Results
+      </button>
+      <button onclick="showResults('people')" id="tab-people" class="tab-btn flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 {% if search_type == 'people' %}bg-[#22c55e] text-white{% else %}text-gray-400 hover:text-white{% endif %}">
+        People ({{ people_results|length }})
+      </button>
+      <button onclick="showResults('posts')" id="tab-posts" class="tab-btn flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 {% if search_type == 'posts' %}bg-[#22c55e] text-white{% else %}text-gray-400 hover:text-white{% endif %}">
+        Posts ({{ posts_results|length }})
+      </button>
+    </div>
+  {% endif %}
+
+  <!-- Search Results -->
+  <div id="searchResults">
+    {% if query %}
+      <!-- All Results -->
+      <div id="all-results" class="result-section {% if search_type != 'all' %}hidden{% endif %}">
+        {% if people_results %}
+          <div class="mb-8">
+            <h3 class="text-lg font-semibold text-white mb-4">People ({{ people_results|length }})</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {% for person in people_results %}
+                <div class="island p-6 hover:border-[#22c55e] transition-all duration-200">
+                  <div class="flex items-start space-x-4 mb-4">
+                    <div class="relative">
+                      {% if person.profile_picture %}
+                        <img src="{{ url_for('static', filename='media/' + person.profile_picture) }}" 
+                             alt="{{ person.name }}" 
+                             class="w-16 h-16 rounded-full object-cover border-2 border-gray-600">
+                      {% else %}
+                        <div class="w-16 h-16 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-semibold text-xl border-2 border-gray-600">
+                          {{ person.name[0] if person.name else '?' }}
+                        </div>
+                      {% endif %}
+                    </div>
+                    
+                    <div class="flex-1 min-w-0">
+                      <h3 class="text-white font-semibold truncate">{{ person.name }}</h3>
+                      <p class="text-gray-400 text-sm truncate mb-2">{{ person.headline }}</p>
+                      
+                      {% if person.match_reasons %}
+                        <div class="flex flex-wrap gap-1 mb-2">
+                          {% for reason in person.match_reasons[:2] %}
+                            <span class="inline-block px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full">
+                              {{ reason }}
+                            </span>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                      
+                      {% if person.education %}
+                        <div class="text-xs text-gray-500 mb-1">
+                          <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"></path>
+                          </svg>
+                          {{ person.education[0].institution if person.education[0].institution else 'Education' }}
+                        </div>
+                      {% endif %}
+                      
+                      {% if person.skills %}
+                        <div class="text-xs text-gray-500">
+                          <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                          </svg>
+                          {{ person.skills|map(attribute='name')|join(', ') if person.skills|length > 0 else 'No skills listed' }}
+                        </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                  
+                  <div class="flex space-x-2">
+                    <button onclick="sendConnectionRequest('{{ person.uid }}', '{{ person.name }}')" 
+                            class="flex-1 px-3 py-1.5 bg-[#22c55e] hover:bg-[#2ea844] text-white text-sm rounded-lg transition-colors">
+                      Connect
+                    </button>
+                    <button onclick="followUser('{{ person.uid }}', '{{ person.name }}')" 
+                            class="px-3 py-1.5 bg-[#2a2a2a] hover:bg-[#333] text-white text-sm rounded-lg transition-colors">
+                      Follow
+                    </button>
+                    <a href="{{ url_for('profile_view', uid=person.uid) }}" 
+                       class="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded-lg transition-colors">
+                      View
+                    </a>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {% if posts_results %}
+          <div class="mb-8">
+            <h3 class="text-lg font-semibold text-white mb-4">Posts ({{ posts_results|length }})</h3>
+            <div class="space-y-4">
+              {% for post in posts_results %}
+                <div class="island p-6 hover:border-[#22c55e] transition-all duration-200">
+                  <div class="flex items-start space-x-4">
+                    <div class="flex-shrink-0">
+                      {% if post.author_picture %}
+                        <img src="{{ url_for('static', filename='media/' + post.author_picture) }}" 
+                             alt="{{ post.author_name }}" 
+                             class="w-12 h-12 rounded-full object-cover border-2 border-gray-600">
+                      {% else %}
+                        <div class="w-12 h-12 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-semibold text-lg border-2 border-gray-600">
+                          {{ post.author_initials }}
+                        </div>
+                      {% endif %}
+                    </div>
+                    
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center space-x-2 mb-2">
+                        <h4 class="text-white font-medium">{{ post.author_name }}</h4>
+                        {% if post.author_headline %}
+                          <span class="text-gray-400 text-sm">• {{ post.author_headline }}</span>
+                        {% endif %}
+                        <span class="text-gray-500 text-sm">• {{ post.created_at[:10] }}</span>
+                      </div>
+                      
+                      <div class="text-white mb-3">{{ post.content|nl2br }}</div>
+                      
+                      {% if post.hashtags %}
+                        <div class="flex flex-wrap gap-1 mb-3">
+                          {% for hashtag in post.hashtags %}
+                            <a href="{{ url_for('collab_hashtag', hashtag=hashtag) }}" 
+                               class="inline-block px-2 py-1 bg-[#22c55e]/20 text-[#22c55e] text-xs rounded-full hover:bg-[#22c55e]/30 transition-colors">
+                              #{{ hashtag }}
+                            </a>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                      
+                      <div class="flex items-center space-x-4 text-gray-400 text-sm">
+                        <span class="flex items-center">
+                          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+                          </svg>
+                          {{ post.reaction_counts.insightful + post.reaction_counts.motivating + post.reaction_counts.support }}
+                        </span>
+                        <span class="flex items-center">
+                          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                          </svg>
+                          {{ post.comment_count }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="mt-4 pt-4 border-t border-gray-700">
+                    <a href="{{ url_for('post_view', post_id=post.post_id) }}" 
+                       class="px-4 py-2 bg-[#22c55e] hover:bg-[#2ea844] text-white text-sm rounded-lg transition-colors">
+                      View Post
+                    </a>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {% if not people_results and not posts_results %}
+          <div class="island p-12 text-center">
+            <div class="w-16 h-16 bg-[#2a2a2a] rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+              </svg>
+            </div>
+            <h3 class="text-xl font-semibold text-white mb-2">No Results Found</h3>
+            <p class="text-gray-400 mb-4">Try adjusting your search terms or filters</p>
+            <button onclick="clearFilters()" class="px-4 py-2 bg-[#22c55e] hover:bg-[#2ea844] text-white rounded-lg transition-colors">
+              Clear Filters
+            </button>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- People Results Only -->
+      <div id="people-results" class="result-section {% if search_type != 'people' %}hidden{% endif %}">
+        {% if people_results %}
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {% for person in people_results %}
+              <div class="island p-6 hover:border-[#22c55e] transition-all duration-200">
+                <div class="flex items-start space-x-4 mb-4">
+                  <div class="relative">
+                    {% if person.profile_picture %}
+                      <img src="{{ url_for('static', filename='media/' + person.profile_picture) }}" 
+                           alt="{{ person.name }}" 
+                           class="w-16 h-16 rounded-full object-cover border-2 border-gray-600">
+                    {% else %}
+                      <div class="w-16 h-16 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-semibold text-xl border-2 border-gray-600">
+                        {{ person.name[0] if person.name else '?' }}
+                      </div>
+                    {% endif %}
+                  </div>
+                  
+                  <div class="flex-1 min-w-0">
+                    <h3 class="text-white font-semibold truncate">{{ person.name }}</h3>
+                    <p class="text-gray-400 text-sm truncate mb-2">{{ person.headline }}</p>
+                    
+                    {% if person.match_reasons %}
+                      <div class="flex flex-wrap gap-1 mb-2">
+                        {% for reason in person.match_reasons[:2] %}
+                          <span class="inline-block px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full">
+                            {{ reason }}
+                          </span>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                    
+                    {% if person.education %}
+                      <div class="text-xs text-gray-500 mb-1">
+                        <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"></path>
+                        </svg>
+                        {{ person.education[0].institution if person.education[0].institution else 'Education' }}
+                      </div>
+                    {% endif %}
+                    
+                    {% if person.skills %}
+                      <div class="text-xs text-gray-500">
+                        <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                        {{ person.skills|map(attribute='name')|join(', ') if person.skills|length > 0 else 'No skills listed' }}
+                      </div>
+                    {% endif %}
+                  </div>
+                </div>
+                
+                <div class="flex space-x-2">
+                  <button onclick="sendConnectionRequest('{{ person.uid }}', '{{ person.name }}')" 
+                          class="flex-1 px-3 py-1.5 bg-[#22c55e] hover:bg-[#2ea844] text-white text-sm rounded-lg transition-colors">
+                    Connect
+                  </button>
+                  <button onclick="followUser('{{ person.uid }}', '{{ person.name }}')" 
+                          class="px-3 py-1.5 bg-[#2a2a2a] hover:bg-[#333] text-white text-sm rounded-lg transition-colors">
+                    Follow
+                  </button>
+                  <a href="{{ url_for('profile_view', uid=person.uid) }}" 
+                     class="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded-lg transition-colors">
+                    View
+                  </a>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="island p-12 text-center">
+            <h3 class="text-xl font-semibold text-white mb-2">No People Found</h3>
+            <p class="text-gray-400">No people match your search criteria.</p>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Posts Results Only -->
+      <div id="posts-results" class="result-section {% if search_type != 'posts' %}hidden{% endif %}">
+        {% if posts_results %}
+          <div class="space-y-4">
+            {% for post in posts_results %}
+              <div class="island p-6 hover:border-[#22c55e] transition-all duration-200">
+                <div class="flex items-start space-x-4">
+                  <div class="flex-shrink-0">
+                    {% if post.author_picture %}
+                      <img src="{{ url_for('static', filename='media/' + post.author_picture) }}" 
+                           alt="{{ post.author_name }}" 
+                           class="w-12 h-12 rounded-full object-cover border-2 border-gray-600">
+                    {% else %}
+                      <div class="w-12 h-12 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-semibold text-lg border-2 border-gray-600">
+                        {{ post.author_initials }}
+                      </div>
+                    {% endif %}
+                  </div>
+                  
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center space-x-2 mb-2">
+                      <h4 class="text-white font-medium">{{ post.author_name }}</h4>
+                      {% if post.author_headline %}
+                        <span class="text-gray-400 text-sm">• {{ post.author_headline }}</span>
+                      {% endif %}
+                      <span class="text-gray-500 text-sm">• {{ post.created_at[:10] }}</span>
+                    </div>
+                    
+                    <div class="text-white mb-3">{{ post.content|nl2br }}</div>
+                    
+                    {% if post.hashtags %}
+                      <div class="flex flex-wrap gap-1 mb-3">
+                        {% for hashtag in post.hashtags %}
+                          <a href="{{ url_for('collab_hashtag', hashtag=hashtag) }}" 
+                             class="inline-block px-2 py-1 bg-[#22c55e]/20 text-[#22c55e] text-xs rounded-full hover:bg-[#22c55e]/30 transition-colors">
+                            #{{ hashtag }}
+                          </a>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                    
+                    <div class="flex items-center space-x-4 text-gray-400 text-sm">
+                      <span class="flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path>
+                        </svg>
+                        {{ post.reaction_counts.insightful + post.reaction_counts.motivating + post.reaction_counts.support }}
+                      </span>
+                      <span class="flex items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                        </svg>
+                        {{ post.comment_count }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="mt-4 pt-4 border-t border-gray-700">
+                  <a href="{{ url_for('post_view', post_id=post.post_id) }}" 
+                     class="px-4 py-2 bg-[#22c55e] hover:bg-[#2ea844] text-white text-sm rounded-lg transition-colors">
+                    View Post
+                  </a>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="island p-12 text-center">
+            <h3 class="text-xl font-semibold text-white mb-2">No Posts Found</h3>
+            <p class="text-gray-400">No posts match your search criteria.</p>
+          </div>
+        {% endif %}
+      </div>
+    {% else %}
+      <!-- Initial State -->
+      <div class="island p-12 text-center">
+        <div class="w-16 h-16 bg-[#2a2a2a] rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">Search ScleraCollab</h3>
+        <p class="text-gray-400 mb-6">Find people, posts, and content across the platform</p>
+        
+        <!-- Popular Searches -->
+        <div class="mb-6">
+          <p class="text-gray-400 text-sm mb-3">Popular searches:</p>
+          <div class="flex flex-wrap gap-2 justify-center">
+            <button onclick="quickSearch('developer')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-sm rounded-full transition-colors">
+              Developers
+            </button>
+            <button onclick="quickSearch('designer')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-sm rounded-full transition-colors">
+              Designers
+            </button>
+            <button onclick="quickSearch('entrepreneur')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-sm rounded-full transition-colors">
+              Entrepreneurs
+            </button>
+            <button onclick="quickSearch('mentor')" class="px-3 py-1 bg-[#2a2a2a] hover:bg-[#333] text-gray-300 text-sm rounded-full transition-colors">
+              Mentors
+            </button>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Store template data in hidden elements -->
+<div id="people-data" style="display:none;">{{ people_results|tojson if people_results else '[]' }}</div>
+<div id="posts-data" style="display:none;">{{ posts_results|tojson if posts_results else '[]' }}</div>
+
+<script>
+// Initialize results from server-side data
+var currentPeopleResults = [];
+var currentPostsResults = [];
+
+// Parse data from hidden elements
+try {
+    currentPeopleResults = JSON.parse(document.getElementById('people-data').textContent);
+} catch (e) {
+    currentPeopleResults = [];
+}
+
+try {
+    currentPostsResults = JSON.parse(document.getElementById('posts-data').textContent);
+} catch (e) {
+    currentPostsResults = [];
+}
+
+function performSearch(event) {
+    if (event) event.preventDefault();
+    
+    const query = document.getElementById('searchQuery').value.trim();
+    const searchType = document.getElementById('searchType').value;
+    const school = document.getElementById('schoolFilter').value.trim();
+    const skill = document.getElementById('skillFilter').value.trim();
+    
+    const params = new URLSearchParams();
+    if (query) params.append('q', query);
+    if (school) params.append('school', school);
+    if (skill) params.append('skill', skill);
+    params.append('type', searchType);
+    
+    // Update URL
+    const newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+    window.location.href = newUrl;
+}
+
+function quickSearch(term) {
+    document.getElementById('searchQuery').value = term;
+    performSearch();
+}
+
+function setQuickFilter(type) {
+    switch(type) {
+        case 'school':
+            alert('School filter coming soon!');
+            break;
+        case 'skills':
+            alert('Skills filter coming soon!');
+            break;
+        case 'mentors':
+            document.getElementById('searchQuery').value = 'mentor';
+            document.getElementById('connectionFilter').value = 'not_connected';
+            performSearch();
+            break;
+    }
+}
+
+function clearFilters() {
+    document.getElementById('searchQuery').value = '';
+    document.getElementById('schoolFilter').value = '';
+    document.getElementById('skillFilter').value = '';
+    document.getElementById('connectionFilter').value = '';
+    document.getElementById('searchType').value = 'all';
+    
+    // Clear URL
+    window.location.href = window.location.pathname;
+}
+
+function showResults(type) {
+    // Hide all result sections
+    document.querySelectorAll('.result-section').forEach(section => {
+        section.classList.add('hidden');
+    });
+    
+    // Reset all tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-[#22c55e]', 'text-white');
+        btn.classList.add('text-gray-400');
+    });
+    
+    // Show selected section
+    document.getElementById(type + '-results').classList.remove('hidden');
+    document.getElementById('tab-' + type).classList.add('bg-[#22c55e]', 'text-white');
+    document.getElementById('tab-' + type).classList.remove('text-gray-400');
+}
+
+// Show/hide people filters based on search type
+document.getElementById('searchType').addEventListener('change', function() {
+    const searchType = this.value;
+    const peopleFilters = document.getElementById('peopleFilters');
+    
+    if (searchType === 'posts') {
+        peopleFilters.classList.add('hidden');
+    } else {
+        peopleFilters.classList.remove('hidden');
+    }
+});
+
+function sendConnectionRequest(uid, name) {
+    fetch('/api/collab/connections/send', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            to_uid: uid,
+            type: 'peer',
+            message: ''
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Connection request sent to ${name}!`);
+        } else {
+            alert(data.error || 'Failed to send connection request');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to send connection request');
+    });
+}
+
+function followUser(uid, name) {
+    fetch(`/api/collab/follow/${uid}`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`You are now following ${name}!`);
+        } else {
+            alert(data.error || 'Failed to follow user');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to follow user');
+    });
+}
+</script>
+{% endblock %}

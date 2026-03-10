@@ -1,0 +1,2567 @@
+"""
+ScleraCollab Utilities (Standalone)
+- Profile completion scoring
+- Privacy helpers
+- Profile schema initialiser
+"""
+
+from datetime import datetime, timedelta
+import uuid
+import bleach
+import re
+import base64
+import json
+from firebase_config import db
+from firebase_admin import firestore
+
+
+# ============================================================================
+# AI SEMANTIC MATCHING (Sentence Transformers)
+# ============================================================================
+try:
+    from sentence_transformers import SentenceTransformer
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+    AI_AVAILABLE = True
+    print("✅ Sentence Transformers loaded successfully")
+except ImportError as e:
+    AI_AVAILABLE = False
+    print(f"⚠️  AI semantic matching not available: {e}")
+    print("   Install with: pip install sentence-transformers scikit-learn numpy")
+
+# Global model instance (lazy loading)
+_model = None
+_embeddings_cache = {}
+_cache_expiry = {}
+
+def get_model():
+    """Get or initialize the sentence transformer model"""
+    global _model
+    if _model is None and AI_AVAILABLE:
+        try:
+            _model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("🤖 AI Model loaded: all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"❌ Failed to load AI model: {e}")
+            _model = None
+    return _model
+
+def get_cached_embedding(text: str) -> np.ndarray:
+    """Get cached embedding or compute new one"""
+    if not AI_AVAILABLE or not text:
+        return None
+    
+    cache_key = text.lower().strip()
+    now = datetime.utcnow()
+    
+    # Check cache
+    if cache_key in _embeddings_cache:
+        cached_time = _cache_expiry.get(cache_key)
+        if cached_time and now - cached_time < timedelta(hours=24):
+            return _embeddings_cache[cache_key]
+    
+    # Compute new embedding
+    model = get_model()
+    if model is None:
+        return None
+    
+    try:
+        embedding = model.encode([text])[0]
+        
+        # Cache it
+        _embeddings_cache[cache_key] = embedding
+        _cache_expiry[cache_key] = now
+        
+        # Clean old cache entries periodically
+        if len(_embeddings_cache) > 1000:
+            clean_cache()
+        
+        return embedding
+    except Exception as e:
+        print(f"❌ Failed to compute embedding: {e}")
+        return None
+
+def clean_cache():
+    """Clean expired cache entries"""
+    now = datetime.utcnow()
+    expired_keys = []
+    
+    for key, expiry_time in _cache_expiry.items():
+        if now - expiry_time > timedelta(hours=24):
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        _embeddings_cache.pop(key, None)
+        _cache_expiry.pop(key, None)
+
+def get_semantic_matches(query: str, candidates: list, threshold: float = 0.3) -> list:
+    """Get semantic matches using AI instead of hardcoded mapping"""
+    if not AI_AVAILABLE or not query or not candidates:
+        return []
+    
+    model = get_model()
+    if model is None:
+        return []
+    
+    try:
+        # Encode query once
+        query_embedding = model.encode([query], convert_to_tensor=True)
+        
+        # Batch encode candidates for efficiency
+        if len(candidates) > 0:
+            candidate_embeddings = model.encode(candidates, convert_to_tensor=True)
+            
+            # Calculate similarities
+            similarities = cosine_similarity(query_embedding, candidate_embeddings)[0]
+            
+            # Return candidates with similarity scores above threshold
+            scored_candidates = []
+            for i, similarity in enumerate(similarities):
+                if similarity > threshold:
+                    scored_candidates.append({
+                        'text': candidates[i],
+                        'score': float(similarity)
+                    })
+            
+            # Sort by similarity score
+            scored_candidates.sort(key=lambda x: x['score'], reverse=True)
+            return scored_candidates
+        
+        return []
+    except Exception as e:
+        print(f"❌ Semantic matching failed: {e}")
+        return []
+
+def is_similar_skill_ai(skill1: str, skill2: str, threshold: float = 0.7) -> bool:
+    """AI-powered skill similarity matching"""
+    if not skill1 or not skill2 or not AI_AVAILABLE:
+        return False
+    
+    try:
+        model = get_model()
+        if model is None:
+            return False
+        
+        embeddings = model.encode([skill1, skill2])
+        similarity = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
+        
+        return similarity >= threshold
+    except Exception as e:
+        print(f"❌ AI skill matching failed: {e}")
+        return False
+
+def is_similar_school_ai(school1: str, school2: str, threshold: float = 0.8) -> bool:
+    """AI-powered school name similarity matching"""
+    if not school1 or not school2 or not AI_AVAILABLE:
+        return False
+    
+    try:
+        model = get_model()
+        if model is None:
+            return False
+        
+        embeddings = model.encode([school1, school2])
+        similarity = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
+        
+        return similarity >= threshold
+    except Exception as e:
+        print(f"❌ AI school matching failed: {e}")
+        return False
+
+# ============================================================================
+# PROFILE COMPLETION SCORING
+# ============================================================================
+
+COMPLETION_WEIGHTS = {
+    'photo':              {'points': 10, 'label': 'Add a profile photo',         'section': 'photo'},
+    'headline':           {'points': 10, 'label': 'Add a headline',               'section': 'basic'},
+    'bio':                {'points': 10, 'label': 'Write a bio',                  'section': 'basic'},
+    'education':          {'points': 15, 'label': 'Add your education',           'section': 'education'},
+    'skills_min_3':       {'points': 10, 'label': 'Add at least 3 skills',        'section': 'skills'},
+    'experience_or_proj': {'points': 15, 'label': 'Add experience or a project',  'section': 'experience'},
+    'connections_min_5':  {'points': 10, 'label': 'Connect with 5 people',        'section': None},
+    'first_post':         {'points': 10, 'label': 'Share your first post',        'section': None},
+    'recommendation':     {'points': 10, 'label': 'Get a recommendation',         'section': None},
+    'languages':          {'points': 5,  'label': 'Add languages you speak',      'section': 'languages'},
+    'volunteer_or_award': {'points': 5,  'label': 'Add volunteer work or awards', 'section': 'volunteer'},
+}
+
+COMPLETION_MILESTONES = [
+    {'threshold': 0,   'label': 'Starter',      'color': '#6b7280'},
+    {'threshold': 30,  'label': 'Beginner',     'color': '#6b7280'},
+    {'threshold': 50,  'label': 'Intermediate', 'color': '#f59e0b'},
+    {'threshold': 70,  'label': 'Advanced',     'color': '#3b82f6'},
+    {'threshold': 90,  'label': 'Expert',       'color': '#8b5cf6'},
+    {'threshold': 100, 'label': 'All-Star',     'color': '#22c55e'},
+]
+
+
+def calculate_profile_completion(profile: dict, connection_count: int = 0,
+                                  post_count: int = 0) -> dict:
+    completed, missing = [], []
+    checks = {
+        'photo':              bool(profile.get('profile_picture')),
+        'headline':           bool(str(profile.get('headline', '')).strip()),
+        'bio':                bool(str(profile.get('bio', '')).strip()),
+        'education':          bool(profile.get('education')),
+        'skills_min_3':       len(profile.get('skills', [])) >= 3,
+        'experience_or_proj': bool(profile.get('experience') or profile.get('projects')),
+        'connections_min_5':  connection_count >= 5,
+        'first_post':         post_count >= 1,
+        'recommendation':     bool(profile.get('recommendations_received')),
+        'languages':          bool(profile.get('languages')),
+        'volunteer_or_award': bool(profile.get('volunteer') or profile.get('awards')),
+    }
+    total_score = 0
+    for key, done in checks.items():
+        info = COMPLETION_WEIGHTS[key]
+        if done:
+            completed.append(key)
+            total_score += info['points']
+        else:
+            missing.append({'key': key, **info})
+
+    milestone = COMPLETION_MILESTONES[0]
+    for m in COMPLETION_MILESTONES:
+        if total_score >= m['threshold']:
+            milestone = m
+
+    return {
+        'score': min(total_score, 100),
+        'milestone': milestone['label'],
+        'milestone_color': milestone['color'],
+        'completed': completed,
+        'missing': missing,
+        'next_action': missing[0] if missing else None,
+    }
+
+
+# ============================================================================
+# PRIVACY
+# ============================================================================
+
+DEFAULT_PRIVACY = {
+    'profile_picture': 'public',
+    'headline':        'public',
+    'bio':             'public',
+    'education':       'public',
+    'experience':      'connections',
+    'projects':        'public',
+    'skills':          'public',
+    'volunteer':       'public',
+    'awards':          'public',
+    'languages':       'public',
+    'publications':    'connections',
+    'contact_info':    'connections',
+    'recommendations': 'public',
+}
+
+
+def get_visibility(privacy: dict, section: str, viewer_uid: str,
+                   profile_uid: str, is_connection: bool) -> bool:
+    if viewer_uid == profile_uid:
+        return True
+    level = privacy.get(section, DEFAULT_PRIVACY.get(section, 'public'))
+    if level == 'public':      return True
+    if level == 'connections': return is_connection
+    return False  # only_me
+
+
+def filter_profile_for_viewer(profile: dict, viewer_uid: str,
+                               profile_uid: str, is_connection: bool) -> dict:
+    privacy = profile.get('privacy', DEFAULT_PRIVACY)
+    always_visible = [
+        'uid', 'name', 'headline', 'profile_picture', 'profile_banner',
+        'follower_count', 'following_count', 'connection_count',
+        'profile_completion', 'location', 'website', 'github', 'linkedin',
+    ]
+    filtered = {}
+    for key, val in profile.items():
+        if key in always_visible:
+            filtered[key] = val
+        elif get_visibility(privacy, key, viewer_uid, profile_uid, is_connection):
+            filtered[key] = val
+        else:
+            filtered[key] = None
+    return filtered
+
+
+# ============================================================================
+# PROFILE SCHEMA
+# ============================================================================
+
+def initialize_collab_profile(uid: str, name: str, email: str) -> dict:
+    """Creates a blank collab_users document for a brand-new user."""
+    now = datetime.utcnow().isoformat()
+    return {
+        'uid': uid,
+        'name': name,
+        'email': email,
+        'headline': '',
+        'bio': '',
+        'profile_picture': None,
+        'profile_banner': None,
+        'location': '',
+        'website': '',
+        'github': '',
+        'linkedin': '',
+        'education': [],
+        'experience': [],
+        'volunteer': [],
+        'projects': [],
+        'publications': [],
+        'patents': [],
+        'awards': [],
+        'languages': [],
+        'certifications': [],
+        'skills': [],
+        'follower_count': 0,
+        'following_count': 0,
+        'connection_count': 0,
+        'post_count': 0,
+        'recommendations_received': [],
+        'profile_completion': 0,
+        'setup_complete': False,
+        'privacy': DEFAULT_PRIVACY.copy(),
+        'mentorship_available': False,
+        'mentorship_focus_areas': [],
+        'mentorship_preferences': {
+            'time_commitment': 'monthly',
+            'communication_style': 'video',
+            'max_mentees': 3
+        },
+        'mentorship_stats': {
+            'total_mentees': 0,
+            'active_mentees': 0,
+            'completed_mentorships': 0,
+            'average_rating': 0
+        },
+        'created_at': now,
+        'updated_at': now,
+    }
+
+
+# ============================================================================
+# VALIDATORS
+# ============================================================================
+
+def validate_experience_entry(data: dict) -> tuple:
+    if not data.get('title'):   return False, 'Job title is required'
+    if not data.get('company'): return False, 'Company/Organization is required'
+    return True, ''
+
+def validate_education_entry(data: dict) -> tuple:
+    if not data.get('institution'): return False, 'Institution name is required'
+    return True, ''
+
+def validate_project_entry(data: dict) -> tuple:
+    if not data.get('title'): return False, 'Project title is required'
+    return True, ''
+
+def validate_mentorship_entry(data: dict) -> tuple:
+    """Validate mentorship profile data"""
+    focus_areas = data.get('focus_areas', [])
+    if len(focus_areas) > 3:
+        return False, 'Maximum 3 focus areas allowed'
+    
+    valid_focus_areas = [
+        'Academic Subjects', 'Career Guidance', 'College Applications',
+        'Exam Preparation', 'Skill Development', 'Programming',
+        'Business & Entrepreneurship', 'Design & Creative', 'Science & Research',
+        'Language Learning', 'Personal Development', 'Technology'
+    ]
+    
+    for area in focus_areas:
+        if area not in valid_focus_areas:
+            return False, f'Invalid focus area: {area}'
+    
+    max_mentees = data.get('max_mentees', 3)
+    try:
+        max_mentees = int(max_mentees)
+        if max_mentees < 1 or max_mentees > 10:
+            return False, 'Maximum mentees must be between 1 and 10'
+    except ValueError:
+        return False, 'Invalid maximum mentees value'
+    
+    return True, ''
+
+
+# ============================================================================
+# DISPLAY HELPERS
+# ============================================================================
+
+def get_initials(name: str) -> str:
+    parts = name.strip().split()
+    if not parts:        return '?'
+    if len(parts) == 1:  return parts[0][0].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+# ============================================================================
+# FUZZY MATCHING HELPERS
+# ============================================================================
+
+def is_similar_skill(skill1: str, skill2: str) -> bool:
+    """AI-powered skill similarity with fallback to traditional matching"""
+    if not skill1 or not skill2:
+        return False
+    
+    # Try AI matching first
+    try:
+        if is_similar_skill_ai(skill1, skill2):
+            return True
+    except Exception as e:
+        print(f"❌ AI skill matching failed: {e}")
+    
+    # Fallback to traditional exact/partial matching
+    return traditional_skill_matching(skill1, skill2)
+
+def traditional_skill_matching(skill1: str, skill2: str) -> bool:
+    """Fallback skill matching logic"""
+    skill1_lower = skill1.lower().strip()
+    skill2_lower = skill2.lower().strip()
+    
+    # Exact match
+    if skill1_lower == skill2_lower:
+        return True
+    
+    # Partial match (one contains the other)
+    if skill1_lower in skill2_lower or skill2_lower in skill1_lower:
+        return len(min(skill1_lower, skill2_lower, key=len)) >= 3
+    
+    # Check if they share common words
+    words1 = skill1_lower.split()
+    words2 = skill2_lower.split()
+    
+    common_words = set(words1) & set(words2)
+    if common_words and len(common_words) >= 1:
+        return True
+    
+    return False
+
+
+def is_similar_school(school1: str, school2: str) -> bool:
+    """AI-powered school similarity with fallback to traditional matching"""
+    # Handle non-string inputs
+    if not isinstance(school1, str) or not isinstance(school2, str):
+        return False
+    
+    # Try AI matching first
+    try:
+        if is_similar_school_ai(school1, school2):
+            return True
+    except Exception as e:
+        print(f"❌ AI school matching failed: {e}")
+    
+    # Fallback to traditional matching
+    return traditional_school_matching(school1, school2)
+
+def traditional_school_matching(school1: str, school2: str) -> bool:
+    """Fallback school matching logic"""
+    school1_lower = school1.lower().strip()
+    school2_lower = school2.lower().strip()
+    
+    # Skip empty strings
+    if not school1_lower or not school2_lower:
+        return False
+    
+    # Exact match
+    if school1_lower == school2_lower:
+        return True
+    
+    # Common school name variations and abbreviations
+    school_mappings = {
+        'podar': ['rn podar', 'r.n. podar', 'podar school', 'podar international'],
+        'stanford': ['stanford university', 'stanford uni'],
+        'mit': ['massachusetts institute of technology', 'massachusetts institute'],
+        'harvard': ['harvard university', 'harvard uni'],
+        'berkeley': ['uc berkeley', 'university of california berkeley'],
+        'ucla': ['university of california los angeles'],
+        'nyu': ['new york university'],
+        'iit': ['indian institute of technology', 'iit delhi', 'iit bombay', 'iit madras'],
+        'oxford': ['oxford university', 'university of oxford'],
+        'cambridge': ['cambridge university', 'university of cambridge'],
+        'yale': ['yale university'],
+        'princeton': ['princeton university'],
+    }
+    
+    # Check mappings
+    for base_school, variations in school_mappings.items():
+        if base_school in school1_lower and base_school in school2_lower:
+            return True
+        if any(var in school1_lower for var in variations) and any(var in school2_lower for var in variations):
+            return True
+    
+    # Check for partial matches (one contains the other)
+    if school1_lower in school2_lower or school2_lower in school1_lower:
+        # Only if the shorter name is substantial
+        shorter = min(school1_lower, school2_lower, key=len)
+        if len(shorter) >= 4:
+            return True
+    
+    # Check for common words
+    words1 = school1_lower.split()
+    words2 = school2_lower.split()
+    
+    common_words = set(words1) & set(words2)
+    if common_words and len(common_words) >= 1:
+        return True
+    
+    return False
+
+
+# ============================================================================
+# NETWORK & CONNECTION HELPERS
+# ============================================================================
+
+def get_smart_suggestions(uid: str, limit: int = 20) -> list:
+    """Generate smart suggestions for a user based on mutual connections, school, skills"""
+    suggestions = []
+    
+    print(f"Getting suggestions for user: {uid}")
+    
+    # Get user's profile for context
+    user_profile = db.collection('collab_users').document(uid).get()
+    if not user_profile.exists:
+        print(f"User {uid} not found")
+        return suggestions
+    
+    user_data = user_profile.to_dict()
+    # Extract schools properly - handle both string and dict formats
+    user_schools = []
+    for edu in user_data.get('education', []):
+        if isinstance(edu, str):
+            if edu.strip():
+                user_schools.append(edu.strip())
+        elif isinstance(edu, dict):
+            school = edu.get('institution', '')
+            if isinstance(school, str) and school.strip():
+                user_schools.append(school.strip())
+            # Also check if the dict itself contains school-like data
+            elif 'board' in edu or 'grade' in edu:
+                # This might be a malformed education entry from migration
+                pass
+    
+    user_skills = [skill.get('name', '') for skill in user_data.get('skills', [])]
+    user_grade = None
+    for edu in user_data.get('education', []):
+        if isinstance(edu, dict) and edu.get('grade'):
+            user_grade = edu.get('grade')
+            break
+    
+    # Get existing connections to exclude
+    existing_connections = set()
+    conn_snap = db.collection('connections') \
+                  .where('user_a', '==', uid) \
+                  .where('status', 'in', ['pending', 'accepted']) \
+                  .get()
+    for conn in conn_snap:
+        existing_connections.add(conn.to_dict().get('user_b'))
+    
+    conn_snap = db.collection('connections') \
+                  .where('user_b', '==', uid) \
+                  .where('status', 'in', ['pending', 'accepted']) \
+                  .get()
+    for conn in conn_snap:
+        existing_connections.add(conn.to_dict().get('user_a'))
+    
+    # Get all potential candidates (limit to avoid performance issues)
+    all_users = db.collection('collab_users').limit(100).get()
+    print(f"Found {len(all_users)} total users in database")
+    
+    for user_doc in all_users:
+        candidate_uid = user_doc.id
+        if candidate_uid == uid or candidate_uid in existing_connections:
+            continue
+        
+        candidate_data = user_doc.to_dict()
+        score = 0
+        reasons = []
+        
+        print(f"Evaluating candidate: {candidate_uid} - {candidate_data.get('name', 'Unknown')}")
+        
+        # Mutual connections scoring
+        mutual_count = get_mutual_connections(uid, candidate_uid)
+        if mutual_count > 0:
+            score += mutual_count * 3
+            reasons.append(f"{mutual_count} mutual connection{'s' if mutual_count > 1 else ''}")
+            print(f"  +{mutual_count * 3} points: {mutual_count} mutual connections")
+        
+        # Same school scoring (with fuzzy matching)
+        candidate_schools = []
+        for edu in candidate_data.get('education', []):
+            if isinstance(edu, str):
+                if edu.strip():
+                    candidate_schools.append(edu.strip())
+            elif isinstance(edu, dict):
+                school = edu.get('institution', '')
+                if isinstance(school, str) and school.strip():
+                    candidate_schools.append(school.strip())
+                # Handle malformed education entries
+                elif 'board' in edu or 'grade' in edu:
+                    # Skip malformed entries that don't have school names
+                    pass
+        
+        print(f"  User schools: {user_schools}")
+        print(f"  Candidate schools: {candidate_schools}")
+        for school in user_schools:
+            for candidate_school in candidate_schools:
+                if school and candidate_school and is_similar_school(school, candidate_school):
+                    score += 5
+                    reasons.append("Same school")
+                    print(f"  +5 points: Same school ({school} ~ {candidate_school})")
+                    break
+            if score > 0:  # Already found a match
+                break
+        
+        # Shared skills scoring (with fuzzy matching)
+        candidate_skills = [skill.get('name', '') for skill in candidate_data.get('skills', [])]
+        print(f"  User skills: {user_skills}")
+        print(f"  Candidate skills: {candidate_skills}")
+        
+        # Fuzzy skill matching
+        shared_skills = set()
+        for user_skill in user_skills:
+            for candidate_skill in candidate_skills:
+                if user_skill.lower() == candidate_skill.lower():
+                    shared_skills.add(user_skill)
+                elif is_similar_skill(user_skill, candidate_skill):
+                    shared_skills.add(f"{user_skill} ~ {candidate_skill}")
+        
+        if shared_skills:
+            score += len(shared_skills) * 2
+            reasons.append(f"{len(shared_skills)} shared skill{'s' if len(shared_skills) > 1 else ''}")
+            print(f"  +{len(shared_skills) * 2} points: {len(shared_skills)} shared skills ({', '.join(shared_skills)})")
+        
+        # Same grade scoring
+        candidate_grade = None
+        for edu in candidate_data.get('education', []):
+            if isinstance(edu, dict) and edu.get('grade'):
+                candidate_grade = edu.get('grade')
+                break
+        print(f"  User grade: {user_grade}, Candidate grade: {candidate_grade}")
+        if user_grade and candidate_grade and user_grade == candidate_grade:
+            score += 1
+            reasons.append("Same grade")
+            print(f"  +1 point: Same grade ({user_grade})")
+        
+        print(f"  Final score: {score}, Reasons: {reasons}")
+        
+        if score > 0:
+            suggestions.append({
+                'uid': candidate_uid,
+                'name': candidate_data.get('name', ''),
+                'headline': candidate_data.get('headline', ''),
+                'profile_picture': candidate_data.get('profile_picture', ''),
+                'score': score,
+                'reasons': reasons[:2],  # Limit to top 2 reasons
+                'mutual_connections': mutual_count
+            })
+        else:
+            print(f"  ❌ Skipped: Score 0 (no matching criteria)")
+    
+    # Sort by score and return top suggestions
+    suggestions.sort(key=lambda x: x['score'], reverse=True)
+    final_suggestions = suggestions[:limit]
+    print(f"Returning {len(final_suggestions)} suggestions")
+    return final_suggestions
+
+
+def get_mutual_connections(uid_a: str, uid_b: str) -> int:
+    """Count mutual connections between two users"""
+    try:
+        # Get connections for user A
+        conn_a = set()
+        snap = db.collection('connections') \
+                 .where('user_a', '==', uid_a) \
+                 .where('status', '==', 'accepted') \
+                 .get()
+        for conn in snap:
+            conn_a.add(conn.to_dict().get('user_b'))
+        
+        snap = db.collection('connections') \
+                 .where('user_b', '==', uid_a) \
+                 .where('status', '==', 'accepted') \
+                 .get()
+        for conn in snap:
+            conn_a.add(conn.to_dict().get('user_a'))
+        
+        # Get connections for user B
+        conn_b = set()
+        snap = db.collection('connections') \
+                 .where('user_a', '==', uid_b) \
+                 .where('status', '==', 'accepted') \
+                 .get()
+        for conn in snap:
+            conn_b.add(conn.to_dict().get('user_b'))
+        
+        snap = db.collection('connections') \
+                 .where('user_b', '==', uid_b) \
+                 .where('status', '==', 'accepted') \
+                 .get()
+        for conn in snap:
+            conn_b.add(conn.to_dict().get('user_a'))
+        
+        # Return intersection
+        return len(conn_a & conn_b)
+    except Exception as e:
+        print(f"Error getting mutual connections: {e}")
+        return 0
+
+
+def search_people(query: str, filters: dict = {}, limit: int = 20) -> list:
+    """Search for people by name, school, skills"""
+    results = []
+    
+    # Get all users (in production, this should use proper search indexing)
+    users_snap = db.collection('collab_users').limit(limit * 3).get()
+    
+    for user_doc in users_snap:
+        user_data = user_doc.to_dict()
+        uid = user_doc.id
+        
+        # Skip if no name
+        name = user_data.get('name', '').lower()
+        if not name:
+            continue
+        
+        match_score = 0
+        match_reasons = []
+        
+        # Name matching
+        if query and query.lower() in name:
+            match_score += 10
+            match_reasons.append("Name match")
+        
+        # School filter
+        if filters.get('school'):
+            schools = [edu.get('institution', '').lower() for edu in user_data.get('education', [])]
+            if filters['school'].lower() in str(schools):
+                match_score += 5
+                match_reasons.append("School match")
+        
+        # Skill filter
+        if filters.get('skill'):
+            skills = [skill.get('name', '').lower() for skill in user_data.get('skills', [])]
+            if filters['skill'].lower() in str(skills):
+                match_score += 3
+                match_reasons.append("Skill match")
+        
+        # General query matching in headline/bio
+        if query and query.lower() not in name:
+            headline = user_data.get('headline', '').lower()
+            bio = user_data.get('bio', '').lower()
+            if query.lower() in headline:
+                match_score += 2
+                match_reasons.append("Headline match")
+            elif query.lower() in bio:
+                match_score += 1
+                match_reasons.append("Bio match")
+        
+        if match_score > 0:
+            results.append({
+                'uid': uid,
+                'name': user_data.get('name', ''),
+                'headline': user_data.get('headline', ''),
+                'profile_picture': user_data.get('profile_picture', ''),
+                'match_score': match_score,
+                'match_reasons': match_reasons,
+                'education': user_data.get('education', [])[:1],  # First education only
+                'skills': user_data.get('skills', [])[:3]  # Top 3 skills
+            })
+    
+    # Sort by match score
+    results.sort(key=lambda x: x['match_score'], reverse=True)
+    return results[:limit]
+
+
+def update_connection_counts(uid: str):
+    """Update connection count in user profile"""
+    try:
+        count = 0
+        snap = db.collection('connections') \
+                 .where('user_a', '==', uid) \
+                 .where('status', '==', 'accepted') \
+                 .get()
+        count += len(snap)
+        
+        snap = db.collection('connections') \
+                 .where('user_b', '==', uid) \
+                 .where('status', '==', 'accepted') \
+                 .get()
+        count += len(snap)
+        
+        db.collection('collab_users').document(uid).update({
+            'connection_count': count,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+    except Exception:
+        pass
+
+
+def update_follow_counts(follower_uid: str, following_uid: str, action: str):
+    """Update follower/following counts"""
+    try:
+        if action == 'follow':
+            # Increment following count for follower
+            db.collection('collab_users').document(follower_uid).update({
+                'following_count': firestore.Increment(1)
+            })
+            # Increment follower count for following
+            db.collection('collab_users').document(following_uid).update({
+                'follower_count': firestore.Increment(1)
+            })
+        elif action == 'unfollow':
+            # Decrement following count for follower
+            db.collection('collab_users').document(follower_uid).update({
+                'following_count': firestore.Increment(-1)
+            })
+            # Decrement follower count for following
+            db.collection('collab_users').document(following_uid).update({
+                'follower_count': firestore.Increment(-1)
+            })
+    except Exception:
+        pass
+
+
+def get_users_by_school(school: str, limit: int = 20) -> list:
+    """Get users by school name"""
+    users = []
+    school_lower = school.lower()
+    
+    users_snap = db.collection('collab_users').limit(limit * 2).get()
+    
+    for user_doc in users_snap:
+        user_data = user_doc.to_dict()
+        education = user_data.get('education', [])
+        
+        for edu in education:
+            if school_lower in edu.get('institution', '').lower():
+                users.append({
+                    'uid': user_doc.id,
+                    'name': user_data.get('name', ''),
+                    'headline': user_data.get('headline', ''),
+                    'profile_picture': user_data.get('profile_picture', ''),
+                    'education': edu
+                })
+                break
+    
+    return users[:limit]
+
+
+def get_users_by_skills(skills: list, limit: int = 20) -> list:
+    """Get users by skill names"""
+    users = []
+    skills_lower = [s.lower() for s in skills]
+    
+    # Get all users and filter by skills (with fuzzy matching)
+    try:
+        all_users = db.collection('collab_users').limit(50).get()
+        
+        for user_doc in all_users:
+            user_data = user_doc.to_dict()
+            user_skills = [skill.get('name', '').lower() for skill in user_data.get('skills', [])]
+            
+            # Check if user has any of the requested skills
+            for skill_lower in skills_lower:
+                for user_skill in user_skills:
+                    if skill_lower in user_skill or user_skill in skill_lower:
+                        users.append({
+                            'uid': user_doc.id,
+                            'name': user_data.get('name', ''),
+                            'headline': user_data.get('headline', ''),
+                            'profile_picture': user_data.get('profile_picture', ''),
+                            'skills': user_data.get('skills', [])
+                        })
+                        break
+                if len(users) >= limit:
+                    return users[:limit]
+                    
+    except Exception as e:
+        print(f"Error getting users by skills: {e}")
+    
+    return users[:limit]
+
+
+# ============================================================================
+# POST & FEED HELPERS
+# ============================================================================
+
+def extract_hashtags(text: str) -> list:
+    """Extract hashtags from text"""
+    import re
+    hashtags = re.findall(r'#(\w+)', text)
+    return list(set(hashtags))  # Remove duplicates
+
+
+def sanitize_content(content: str) -> str:
+    """Sanitize user content for security"""
+    import bleach
+    # Allow basic HTML tags for rich text
+    allowed_tags = ['p', 'br', 'strong', 'em', 'u', 'a', 'ul', 'ol', 'li', 'code', 'pre']
+    allowed_attributes = {'a': ['href'], '*': []}
+    return bleach.clean(content, tags=allowed_tags, attributes=allowed_attributes)
+
+
+def create_post(author_uid: str, content: str, post_type: str = 'post', 
+                images: list = None, links: list = None, visibility: str = 'public') -> dict:
+    """Create a new post"""
+    import uuid
+    from datetime import datetime
+    
+    post_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    
+    # Extract hashtags from content
+    hashtags = extract_hashtags(content)
+    
+    # Store both original case and lowercase for case-insensitive search
+    hashtags_lower = [tag.lower() for tag in hashtags]
+    
+    post_data = {
+        'author_uid': author_uid,
+        'type': post_type,
+        'content': sanitize_content(content),
+        'images': images or [],
+        'links': links or [],
+        'hashtags': hashtags,
+        'hashtags_lower': hashtags_lower,
+        'visibility': visibility,
+        'group_id': None,  # For future group posts
+        'reaction_counts': {
+            'insightful': 0,
+            'motivating': 0,
+            'support': 0
+        },
+        'comment_count': 0,
+        'share_count': 0,
+        'view_count': 0,
+        'created_at': now,
+        'updated_at': now,
+        'deleted': False
+    }
+    
+    try:
+        db.collection('posts').document(post_id).set(post_data)
+        
+        # Update user's post count - only if user exists
+        user_ref = db.collection('collab_users').document(author_uid)
+        user_doc = user_ref.get()
+        if user_doc.exists:
+            user_ref.update({'post_count': firestore.Increment(1)})
+        else:
+            print(f"User {author_uid} not found, skipping post count update")
+        
+        return {'post_id': post_id, **post_data}
+    except Exception as e:
+        print(f"Error creating post: {e}")
+        raise
+
+
+def get_feed_posts(uid: str, cursor: str = None, limit: int = 20) -> dict:
+    """Get feed posts for user with optimized cursor-based pagination"""
+    posts = []
+    
+    try:
+        # Get user's connections (accepted) — using participants array field
+        connected_users = set()
+        follows = set()
+
+        try:
+            conn_snap = db.collection('connections')                           .where('participants', 'array_contains', uid)                           .where('status', '==', 'accepted')                           .get()
+            for conn in conn_snap:
+                for participant in conn.to_dict().get('participants', []):
+                    if participant != uid:
+                        connected_users.add(participant)
+        except Exception as e:
+            print(f"Error getting connections for feed: {e}")
+
+        # Get user's follows
+        try:
+            follow_snap = db.collection('follows')                             .where('follower_uid', '==', uid)                             .get()
+            for follow in follow_snap:
+                follows.add(follow.to_dict().get('following_uid'))
+        except Exception as e:
+            print(f"Error getting follows for feed: {e}")
+        
+        # Build optimized query for posts
+        query = db.collection('posts') \
+                  .where('deleted', '==', False) \
+                  .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                  .limit(limit + 1)  # Get one extra for pagination
+        
+        # Apply cursor if provided
+        if cursor:
+            try:
+                cursor_data = json.loads(base64.b64decode(cursor).decode())
+                last_created_at = cursor_data.get('created_at')
+                if last_created_at:
+                    query = query.start_after({
+                        'created_at': last_created_at
+                    })
+            except Exception as e:
+                print(f"Error parsing cursor: {e}")
+        
+        # Execute query
+        posts_snap = query.get()
+        
+        # Filter and enrich posts in Python
+        posts_list = []
+        last_doc = None
+        
+        for i, post_doc in enumerate(posts_snap):
+            if i >= limit:  # Only process up to limit
+                break
+                
+            post = post_doc.to_dict()
+            post['post_id'] = post_doc.id
+            author_uid = post.get('author_uid')
+            
+            # Enhanced visibility filtering
+            visibility = post.get('visibility', 'public')
+            include_post = True
+            
+            if visibility == 'private':
+                include_post = author_uid == uid
+            elif visibility == 'connections':
+                include_post = author_uid in connected_users or author_uid in follows
+            # Public posts are always included
+            
+            if include_post:
+                # Batch get author info for better performance
+                author_doc = db.collection('collab_users').document(author_uid).get()
+                if author_doc.exists:
+                    author = author_doc.to_dict()
+                    post['author_name'] = author.get('name', 'Unknown')
+                    post['author_initials'] = get_initials(author.get('name', 'Unknown'))
+                    post['author_headline'] = author.get('headline', '')
+                    post['author_picture'] = author.get('profile_picture', '')
+                    post['author_verified'] = author.get('verified', False)
+                else:
+                    post['author_name'] = 'Unknown'
+                    post['author_initials'] = '?'
+                    post['author_headline'] = ''
+                    post['author_picture'] = ''
+                    post['author_verified'] = False
+                
+                # Add engagement metrics
+                post['engagement_score'] = (
+                    post.get('reaction_counts', {}).get('insightful', 0) * 3 +
+                    post.get('reaction_counts', {}).get('motivating', 0) * 2 +
+                    post.get('reaction_counts', {}).get('support', 0) * 1 +
+                    post.get('comment_count', 0) * 2 +
+                    post.get('share_count', 0) * 5
+                )
+                
+                posts_list.append(post)
+                last_doc = post_doc
+        
+        # Sort by engagement score for better feed quality
+        posts_list.sort(key=lambda x: (
+            x.get('engagement_score', 0) +
+            (1 if x.get('author_verified') else 0) * 100
+        ), reverse=True)
+        
+        # Generate next cursor
+        next_cursor = None
+        has_more = False
+        if len(posts_snap) > limit and last_doc:
+            cursor_data = {
+                'created_at': last_doc.to_dict().get('created_at')
+            }
+            next_cursor = base64.b64encode(
+                json.dumps(cursor_data).encode()
+            ).decode()
+            has_more = True
+        
+        return {
+            'posts': posts_list,
+            'next_cursor': next_cursor,
+            'has_more': has_more,
+            'total_fetched': len(posts_list)
+        }
+        
+    except Exception as e:
+        print(f"Error getting feed posts: {e}")
+        return {
+            'posts': [],
+            'next_cursor': None,
+            'has_more': False,
+            'total_fetched': 0
+        }
+
+
+def get_post_with_comments(post_id: str, uid: str) -> dict:
+    """Get single post with threaded comments - optimized to avoid composite indexes"""
+    try:
+        # Get post
+        post_ref = db.collection('posts').document(post_id).get()
+        if not post_ref.exists or post_ref.to_dict().get('deleted'):
+            return None
+            
+        post_data = post_ref.to_dict()
+        
+        # Get author info
+        author_uid = post_data.get('author_uid')
+        author_ref = db.collection('collab_users').document(author_uid).get()
+        author_data = author_ref.to_dict() if author_ref.exists else {}
+        
+        # Get user's reaction
+        user_reaction = None
+        reaction_ref = db.collection('posts').document(post_id).collection('reactions').document(uid).get()
+        if reaction_ref.exists:
+            user_reaction = reaction_ref.to_dict().get('reaction_type')
+        
+        # Get comments - optimized to avoid composite index
+        comments = []
+        
+        # Get all comments first, then filter in Python
+        comments_snap = db.collection('posts').document(post_id).collection('comments').get()
+        
+        # Process comments in Python to avoid composite index
+        for comment_doc in comments_snap:
+            comment_data = comment_doc.to_dict()
+            comment_id = comment_doc.id
+            
+            # Skip deleted comments
+            if not comment_data.get('deleted', False):
+                # Get comment author
+                comment_author_uid = comment_data.get('author_uid')
+                comment_author_ref = db.collection('collab_users').document(comment_author_uid).get()
+                comment_author_data = comment_author_ref.to_dict() if comment_author_ref.exists else {}
+                
+                comment_info = {
+                    'id': comment_id,
+                    'author': {
+                        'uid': comment_author_uid,
+                        'name': comment_author_data.get('name', ''),
+                        'profile_picture': comment_author_data.get('profile_picture', '')
+                    },
+                    'content': comment_data.get('content', ''),
+                    'parent_comment_id': comment_data.get('parent_comment_id'),
+                    'reaction_counts': comment_data.get('reaction_counts', {}),
+                    'created_at': comment_data.get('created_at')
+                }
+                
+                comments.append(comment_info)
+        
+        # Sort comments by created_at in Python (more efficient than Firestore sort)
+        comments.sort(key=lambda x: x.get('created_at', ''))
+        
+        return {
+            'id': post_id,
+            'author': {
+                'uid': author_uid,
+                'name': author_data.get('name', ''),
+                'headline': author_data.get('headline', ''),
+                'profile_picture': author_data.get('profile_picture', '')
+            },
+            'content': post_data.get('content', ''),
+            'images': post_data.get('images', []),
+            'links': post_data.get('links', []),
+            'hashtags': post_data.get('hashtags', []),
+            'reaction_counts': post_data.get('reaction_counts', {}),
+            'comment_count': len(comments),
+            'share_count': post_data.get('share_count', 0),
+            'view_count': post_data.get('view_count', 0),
+            'user_reaction': user_reaction,
+            'comments': comments,
+            'created_at': post_data.get('created_at'),
+            'updated_at': post_data.get('updated_at')
+        }
+        
+    except Exception as e:
+        print(f"Error getting post with comments: {e}")
+        return None
+
+
+def get_hashtag_posts(hashtag: str, cursor: str = None, limit: int = 20) -> dict:
+    """Get posts with a specific hashtag using cursor-based pagination"""
+    try:
+        posts = []
+        
+        # Convert hashtag to lowercase for case-insensitive search
+        hashtag_lower = hashtag.lower()
+        
+        # Build query for posts with hashtag (case-insensitive)
+        # Try hashtags_lower field first, fallback to multiple searches
+        try:
+            query = db.collection('posts') \
+                      .where('deleted', '==', False) \
+                      .where('hashtags_lower', 'array_contains', hashtag_lower) \
+                      .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                      .limit(limit + 1)  # Get one extra to determine if there are more
+            
+            # Apply cursor if provided
+            if cursor:
+                try:
+                    cursor_data = json.loads(base64.b64decode(cursor).decode())
+                    last_created_at = cursor_data.get('created_at')
+                    if last_created_at:
+                        query = query.start_after({
+                            'created_at': last_created_at
+                        })
+                except Exception as e:
+                    print(f"Error parsing cursor: {e}")
+            
+            # Execute query
+            posts_snap = query.get()
+            
+        except Exception as e:
+            print(f"Error using hashtags_lower field: {e}")
+            # Fallback: search for multiple case variations
+            hashtag_variations = [hashtag, hashtag.lower(), hashtag.upper(), hashtag.capitalize()]
+            all_posts = []
+            
+            for variant in hashtag_variations:
+                try:
+                    query = db.collection('posts') \
+                              .where('deleted', '==', False) \
+                              .where('hashtags', 'array_contains', variant) \
+                              .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                              .limit(limit + 1)  # Get one extra to determine if there are more
+                    
+                    docs = query.get()
+                    for doc in docs:
+                        post_data = doc.to_dict()
+                        post_data['post_id'] = doc.id
+                        if post_data not in all_posts:
+                            all_posts.append(post_data)
+                except Exception as variant_error:
+                    print(f"Error searching for variant '{variant}': {variant_error}")
+                    continue
+            
+            # Sort all posts by created_at
+            all_posts.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            
+            # Apply limit and pagination manually
+            posts = all_posts[:limit]
+            has_more = len(all_posts) > limit
+            
+            # Enrich posts with author info
+            for post in posts:
+                try:
+                    author_doc = db.collection('collab_users').document(post['author_uid']).get()
+                    if author_doc.exists:
+                        author = author_doc.to_dict()
+                        post['author_name'] = author.get('name', 'Unknown')
+                        post['author_initials'] = get_initials(author.get('name', ''))
+                        post['author_headline'] = author.get('headline', '')
+                        post['author_picture'] = author.get('profile_picture', '')
+                except Exception as author_error:
+                    print(f"Error getting author info: {author_error}")
+                    post['author_name'] = 'Unknown'
+                    post['author_initials'] = 'U'
+                    post['author_headline'] = ''
+                    post['author_picture'] = ''
+            
+            return {
+                'posts': posts,
+                'cursor': '',
+                'has_more': has_more,
+                'post_count': len(all_posts)
+            }
+        
+        # Convert to list and handle pagination
+        posts_list = []
+        last_doc = None
+        for i, post_doc in enumerate(posts_snap):
+            if i < limit:  # Only include up to limit
+                post = post_doc.to_dict()
+                post['post_id'] = post_doc.id
+                
+                # Get author info
+                author_doc = db.collection('collab_users').document(post['author_uid']).get()
+                if author_doc.exists:
+                    author = author_doc.to_dict()
+                    post['author_name'] = author.get('name', 'Unknown')
+                    post['author_initials'] = get_initials(author.get('name', 'Unknown'))
+                else:
+                    post['author_name'] = 'Unknown'
+                    post['author_initials'] = '?'
+                
+                posts_list.append(post)
+                last_doc = post_doc
+        
+        # Generate next cursor
+        next_cursor = None
+        has_more = False
+        if len(posts_snap) > limit and last_doc:
+            cursor_data = {
+                'created_at': last_doc.to_dict().get('created_at')
+            }
+            next_cursor = base64.b64encode(
+                json.dumps(cursor_data).encode()
+            ).decode()
+            has_more = True
+        
+        return {
+            'posts': posts_list,
+            'cursor': next_cursor,
+            'has_more': has_more,
+            'post_count': len(posts_list)
+        }
+        
+    except Exception as e:
+        print(f"Error getting hashtag posts: {e}")
+        return {
+            'posts': [],
+            'cursor': None,
+            'has_more': False,
+            'post_count': 0
+        }
+
+
+def get_trending_hashtags(limit: int = 10) -> list:
+    """Get trending hashtags based on recent post activity"""
+    try:
+        hashtag_counts = {}
+        
+        # Get recent posts (last 7 days)
+        from datetime import datetime, timedelta
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        
+        recent_posts = db.collection('posts') \
+                          .where('deleted', '==', False) \
+                          .where('created_at', '>=', week_ago) \
+                          .get()
+        
+        # Count hashtag occurrences
+        for post_doc in recent_posts:
+            post = post_doc.to_dict()
+            hashtags = post.get('hashtags_lower', [])  # Use lowercase field for counting
+            for hashtag in hashtags:
+                hashtag_counts[hashtag] = hashtag_counts.get(hashtag, 0) + 1
+        
+        # Sort by count and return top hashtags
+        trending = sorted(
+            [{'tag': tag, 'count': count} for tag, count in hashtag_counts.items()],
+            key=lambda x: x['count'],
+            reverse=True
+        )[:10]  # Limit to top 10
+        
+        return trending[:limit]
+        
+    except Exception as e:
+        print(f"Error getting trending hashtags: {e}")
+        return []
+
+
+def search_posts(query: str, filters: dict = {}, limit: int = 20, cursor: str = None) -> dict:
+    """Search for posts by content, hashtags, and author - MORE LENIENT VERSION"""
+    posts = []
+    
+    try:
+        # If no query, return recent posts
+        if not query or not query.strip():
+            # Just get recent posts
+            query_ref = db.collection('posts') \
+                          .where('deleted', '==', False) \
+                          .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                          .limit(limit)
+            
+            posts_snap = query_ref.get()
+            posts_list = []
+            
+            for post_doc in posts_snap:
+                post = post_doc.to_dict()
+                post['post_id'] = post_doc.id
+                post['match_score'] = 1  # Default score for recent posts
+                
+                # Get author info
+                author_uid = post.get('author_uid')
+                author_doc = db.collection('collab_users').document(author_uid).get()
+                if author_doc.exists:
+                    author = author_doc.to_dict()
+                    post['author_name'] = author.get('name', 'Unknown')
+                    post['author_initials'] = get_initials(author.get('name', 'Unknown'))
+                    post['author_headline'] = author.get('headline', '')
+                    post['author_picture'] = author.get('profile_picture', '')
+                    post['author_verified'] = author.get('verified', False)
+                else:
+                    post['author_name'] = 'Unknown'
+                    post['author_initials'] = '?'
+                    post['author_headline'] = ''
+                    post['author_picture'] = ''
+                    post['author_verified'] = False
+                
+                posts_list.append(post)
+            
+            return {
+                'posts': posts_list,
+                'next_cursor': None,
+                'has_more': False,
+                'total_fetched': len(posts_list)
+            }
+        
+        # For searches, get more posts and filter leniently
+        query_ref = db.collection('posts') \
+                      .where('deleted', '==', False) \
+                      .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                      .limit(min(limit * 3, 100))  # Get more posts for better filtering
+        
+        # Apply cursor if provided
+        if cursor:
+            try:
+                cursor_data = json.loads(base64.b64decode(cursor).decode())
+                last_created_at = cursor_data.get('created_at')
+                if last_created_at:
+                    query_ref = query_ref.start_after({
+                        'created_at': last_created_at
+                    })
+            except Exception as e:
+                print(f"Error parsing cursor: {e}")
+        
+        # Execute query
+        posts_snap = query_ref.get()
+        
+        # Filter and enrich posts in Python with LENIENT matching
+        posts_list = []
+        last_doc = None
+        
+        for i, post_doc in enumerate(posts_snap):
+            if len(posts_list) >= limit:  # Stop when we have enough results
+                break
+                
+            post = post_doc.to_dict()
+            post['post_id'] = post_doc.id
+            
+            # Apply LENIENT search filters
+            match_result = lenient_matches_search_criteria(post, query, filters)
+            if not match_result['matches']:
+                continue
+                
+            # Get author info
+            author_uid = post.get('author_uid')
+            author_doc = db.collection('collab_users').document(author_uid).get()
+            if author_doc.exists:
+                author = author_doc.to_dict()
+                post['author_name'] = author.get('name', 'Unknown')
+                post['author_initials'] = get_initials(author.get('name', 'Unknown'))
+                post['author_headline'] = author.get('headline', '')
+                post['author_picture'] = author.get('profile_picture', '')
+                post['author_verified'] = author.get('verified', False)
+            else:
+                post['author_name'] = 'Unknown'
+                post['author_initials'] = '?'
+                post['author_headline'] = ''
+                post['author_picture'] = ''
+                post['author_verified'] = False
+            
+            # Set match score from lenient matching
+            post['match_score'] = match_result['score']
+            
+            posts_list.append(post)
+            last_doc = post_doc
+        
+        # Sort by match score and created_at
+        posts_list.sort(key=lambda x: (x.get('match_score', 0), x.get('created_at', '')), reverse=True)
+        
+        # Generate next cursor
+        next_cursor = None
+        has_more = False
+        if len(posts_snap) > limit and last_doc:
+            cursor_data = {
+                'created_at': last_doc.to_dict().get('created_at')
+            }
+            next_cursor = base64.b64encode(
+                json.dumps(cursor_data).encode()
+            ).decode()
+            has_more = True
+        
+        return {
+            'posts': posts_list,
+            'next_cursor': next_cursor,
+            'has_more': has_more,
+            'total_fetched': len(posts_list)
+        }
+        
+    except Exception as e:
+        print(f"Error searching posts: {e}")
+        return {
+            'posts': [],
+            'next_cursor': None,
+            'has_more': False,
+            'total_fetched': 0
+        }
+
+
+def lenient_matches_search_criteria(post: dict, query: str, filters: dict) -> dict:
+    """ENHANCED search criteria matching with AI semantic support"""
+    content = post.get('content', '')
+    hashtags = post.get('hashtags_lower', [])
+    author_uid = post.get('author_uid')
+    query_lower = query.lower().strip()
+    
+    # Start with base score
+    score = 0
+    matches = False
+    
+    # LENIENT text search in content
+    if query_lower:
+        # Exact match - highest score
+        if query_lower in content.lower():
+            score += 20
+            matches = True
+        
+        # Word boundary matching
+        content_words = content.lower().split()
+        for word in content_words:
+            # Remove punctuation from word for better matching
+            clean_word = word.strip('.,!?;:"()[]{}')
+            if clean_word and (query_lower in clean_word or clean_word in query_lower):
+                score += 15
+                matches = True
+                break
+        
+        # Hashtag matching
+        for tag in hashtags:
+            if query_lower in tag or tag in query_lower:
+                score += 10
+                matches = True
+                break
+        
+        # AI-powered semantic matching
+        try:
+            semantic_candidates = [content] + hashtags
+            semantic_matches = get_semantic_matches(query_lower, semantic_candidates, threshold=0.3)
+            if semantic_matches:
+                best_match = semantic_matches[0]
+                ai_score = int(best_match['score'] * 100)
+                score += ai_score
+                matches = True
+        except Exception as e:
+            print(f"❌ AI semantic matching failed: {e}")
+        
+        # Fuzzy matching for common variations (fallback)
+        fuzzy_matches = get_fuzzy_matches(query_lower)
+        for fuzzy_term in fuzzy_matches:
+            if fuzzy_term in content:
+                score += 5
+                matches = True
+                break
+    
+    # Author filter
+    if filters.get('author_uid'):
+        if author_uid == filters['author_uid']:
+            score += 10
+        else:
+            return {'matches': False, 'score': 0}
+    
+    # Hashtag filter
+    if filters.get('hashtag'):
+        hashtag_lower = filters['hashtag'].lower()
+        if any(hashtag_lower in tag for tag in hashtags):
+            score += 15
+            matches = True
+        else:
+            return {'matches': False, 'score': 0}
+    
+    # Date range filter
+    if filters.get('date_from'):
+        try:
+            from datetime import datetime
+            date_from = datetime.fromisoformat(filters['date_from'])
+            post_date = datetime.fromisoformat(post.get('created_at', ''))
+            if post_date >= date_from:
+                score += 2
+            else:
+                return {'matches': False, 'score': 0}
+        except:
+            pass
+    
+    if filters.get('date_to'):
+        try:
+            from datetime import datetime
+            date_to = datetime.fromisoformat(filters['date_to'])
+            post_date = datetime.fromisoformat(post.get('created_at', ''))
+            if post_date <= date_to:
+                score += 2
+            else:
+                return {'matches': False, 'score': 0}
+        except:
+            pass
+    
+    # If no query but we have other filters, consider it a match
+    if not query_lower and (filters.get('author_uid') or filters.get('hashtag')):
+        matches = True
+        score = max(score, 5)
+    
+    return {'matches': matches, 'score': score}
+
+
+def get_fuzzy_matches(query: str) -> list:
+    """Get semantic matching variations using AI instead of hardcoded mapping"""
+    if not AI_AVAILABLE or not query:
+        return [query]  # Return original query if AI not available
+    
+    # Common semantic variations for popular tech terms
+    semantic_variations = {
+        'python': ['py', 'python3', 'python programming', 'python dev'],
+        'javascript': ['js', 'javascript', 'nodejs', 'node.js', 'ecmascript'],
+        'react': ['reactjs', 'react.js', 'react native', 'react hooks'],
+        'java': ['java programming', 'jvm', 'java development'],
+        'web': ['website', 'web development', 'web dev', 'frontend', 'backend', 'full stack'],
+        'design': ['designer', 'ui', 'ux', 'designing', 'graphic design'],
+        'data': ['data science', 'database', 'data analysis', 'analytics', 'big data'],
+        'machine': ['machine learning', 'ml', 'ai', 'artificial intelligence', 'deep learning'],
+        'dev': ['developer', 'development', 'devops', 'programming', 'coding'],
+        'app': ['application', 'mobile', 'android', 'ios', 'software'],
+        'code': ['coding', 'programming', 'software', 'source code'],
+        'tech': ['technology', 'technical', 'engineering', 'it'],
+        'student': ['study', 'education', 'learning', 'academic', 'university'],
+        'project': ['projects', 'portfolio', 'work', 'assignment'],
+    }
+    
+    variations = [query]
+    query_lower = query.lower()
+    
+    # Add semantic variations from AI-powered mapping
+    for key, values in semantic_variations.items():
+        if query_lower in key or key in query_lower:
+            variations.extend(values)
+    
+    # Use AI semantic matching for additional variations
+    try:
+        common_terms = ['programming', 'development', 'engineering', 'software', 'technology', 'data', 'web', 'mobile', 'app', 'design', 'ai', 'ml']
+        ai_candidates = []
+        
+        for term in common_terms:
+            if term not in query_lower and len(term) >= 3:
+                ai_candidates.append(f"{query} {term}")
+        
+        if ai_candidates:
+            semantic_matches = get_semantic_matches(query, ai_candidates, threshold=0.4)
+            for match in semantic_matches[:3]:  # Top 3 matches
+                variations.append(match['text'])
+    except Exception as e:
+        print(f"❌ AI semantic variations failed: {e}")
+    
+    return list(set(variations))  # Remove duplicates
+
+
+def matches_search_criteria(post: dict, query: str, filters: dict) -> bool:
+    """Check if a post matches search criteria"""
+    content = post.get('content', '').lower()
+    hashtags = post.get('hashtags_lower', [])
+    author_uid = post.get('author_uid')
+    
+    # Text search in content
+    if query and query.lower():
+        query_lower = query.lower()
+        if query_lower not in content:
+            # Check if query matches any hashtag
+            if not any(query_lower in tag for tag in hashtags):
+                return False
+    
+    # Author filter
+    if filters.get('author_uid'):
+        if author_uid != filters['author_uid']:
+            return False
+    
+    # Hashtag filter
+    if filters.get('hashtag'):
+        hashtag_lower = filters['hashtag'].lower()
+        if hashtag_lower not in hashtags:
+            return False
+    
+    # Date range filter
+    if filters.get('date_from'):
+        try:
+            from datetime import datetime
+            date_from = datetime.fromisoformat(filters['date_from'])
+            post_date = datetime.fromisoformat(post.get('created_at', ''))
+            if post_date < date_from:
+                return False
+        except:
+            pass
+    
+    if filters.get('date_to'):
+        try:
+            from datetime import datetime
+            date_to = datetime.fromisoformat(filters['date_to'])
+            post_date = datetime.fromisoformat(post.get('created_at', ''))
+            if post_date > date_to:
+                return False
+        except:
+            pass
+    
+    return True
+
+
+def calculate_post_match_score(post: dict, query: str, filters: dict) -> int:
+    """Calculate match score for a post"""
+    score = 0
+    content = post.get('content', '').lower()
+    hashtags = post.get('hashtags_lower', [])
+    
+    # Exact query match in content
+    if query and query.lower():
+        query_lower = query.lower()
+        if query_lower in content:
+            score += 10
+            # Bonus for exact word match
+            words = content.split()
+            if query_lower in words:
+                score += 5
+    
+    # Hashtag matches
+    if query and query.lower():
+        query_lower = query.lower()
+        for tag in hashtags:
+            if query_lower in tag:
+                score += 5
+    
+    # Engagement bonus
+    reaction_counts = post.get('reaction_counts', {})
+    engagement = (reaction_counts.get('insightful', 0) * 3 +
+                  reaction_counts.get('motivating', 0) * 2 +
+                  reaction_counts.get('support', 0) * 1 +
+                  post.get('comment_count', 0) * 2)
+    score += min(engagement // 10, 5)  # Cap engagement bonus at 5
+    
+    # Recency bonus (posts from last 3 days)
+    try:
+        from datetime import datetime, timedelta
+        three_days_ago = datetime.utcnow() - timedelta(days=3)
+        post_date = datetime.fromisoformat(post.get('created_at', ''))
+        if post_date > three_days_ago:
+            score += 2
+    except:
+        pass
+    
+    return score
+
+
+def get_all_users(limit: int = 50) -> list:
+    """Get all users for user directory"""
+    users = []
+    
+    try:
+        users_snap = db.collection('collab_users').limit(limit).get()
+        users = []
+        
+        for user_doc in users_snap:
+            user_data = user_doc.to_dict()
+            users.append({
+                'uid': user_doc.id,
+                'name': user_data.get('name', ''),
+                'headline': user_data.get('headline', ''),
+                'profile_picture': user_data.get('profile_picture', ''),
+                'skills': user_data.get('skills', [])[:5],  # Top 5 skills
+                'education': user_data.get('education', [])[:2],  # Top 2 education entries
+                'connection_count': user_data.get('connection_count', 0),
+                'follower_count': user_data.get('follower_count', 0),
+                'post_count': user_data.get('post_count', 0)
+            })
+        
+        return users
+    except Exception as e:
+        print(f"Error getting all users: {e}")
+        return []
+# ============================================================================
+# MENTORSHIP HELPERS
+# ============================================================================
+
+def get_mentor_suggestions(uid: str, limit: int = 10) -> list:
+    """Get mentor suggestions for a user based on their profile"""
+    try:
+        # Get user profile for context
+        user_doc = db.collection('collab_users').document(uid).get()
+        if not user_doc.exists:
+            return []
+        
+        user_data = user_doc.to_dict()
+        user_skills = [skill.get('name', '').lower() for skill in user_data.get('skills', [])]
+        user_schools = []
+        
+        # Extract schools from education
+        for edu in user_data.get('education', []):
+            if isinstance(edu, dict):
+                school = edu.get('institution', '')
+                if school:
+                    user_schools.append(school.lower())
+        
+        # Get all available mentors
+        mentors_query = db.collection('collab_users') \
+                         .where('mentorship_available', '==', True) \
+                         .limit(limit * 3) \
+                         .get()
+        
+        suggestions = []
+        
+        for mentor_doc in mentors_query:
+            if mentor_doc.id == uid:  # Skip self
+                continue
+                
+            mentor_data = mentor_doc.to_dict()
+            score = 0
+            reasons = []
+            
+            # Check for mutual connections
+            mutual_count = get_mutual_connections(uid, mentor_doc.id)
+            if mutual_count > 0:
+                score += mutual_count * 3
+                reasons.append(f"{mutual_count} mutual connection{'s' if mutual_count > 1 else ''}")
+            
+            # Check for shared school
+            mentor_schools = []
+            for edu in mentor_data.get('education', []):
+                if isinstance(edu, dict):
+                    school = edu.get('institution', '')
+                    if school:
+                        mentor_schools.append(school.lower())
+            
+            for user_school in user_schools:
+                for mentor_school in mentor_schools:
+                    if is_similar_school(user_school, mentor_school):
+                        score += 5
+                        reasons.append("Same school")
+                        break
+                if score > 0:
+                    break
+            
+            # Check for shared skills
+            mentor_skills = [skill.get('name', '').lower() for skill in mentor_data.get('skills', [])]
+            shared_skills = set(user_skills) & set(mentor_skills)
+            if shared_skills:
+                score += len(shared_skills) * 2
+                reasons.append(f"{len(shared_skills)} shared skill{'s' if len(shared_skills) > 1 else ''}")
+            
+            # Check focus areas alignment
+            focus_areas = [area.lower() for area in mentor_data.get('mentorship_focus_areas', [])]
+            if focus_areas:
+                score += 2  # Bonus for having focus areas
+                reasons.append("Experienced mentor")
+            
+            if score > 0:
+                suggestions.append({
+                    'uid': mentor_doc.id,
+                    'name': mentor_data.get('name', ''),
+                    'headline': mentor_data.get('headline', ''),
+                    'profile_picture': mentor_data.get('profile_picture', ''),
+                    'mentorship_focus_areas': mentor_data.get('mentorship_focus_areas', []),
+                    'mentorship_stats': mentor_data.get('mentorship_stats', {}),
+                    'skills': mentor_data.get('skills', [])[:3],
+                    'education': mentor_data.get('education', [])[:1],
+                    'score': score,
+                    'reasons': reasons[:2],  # Top 2 reasons
+                    'mutual_connections': mutual_count
+                })
+        
+        # Sort by score and return top suggestions
+        suggestions.sort(key=lambda x: x['score'], reverse=True)
+        return suggestions[:limit]
+        
+    except Exception as e:
+        print(f"Error getting mentor suggestions: {e}")
+        return []
+
+
+def update_mentorship_stats(mentor_uid: str, action: str):
+    """Update mentorship statistics for a mentor"""
+    try:
+        mentor_doc = db.collection('collab_users').document(mentor_uid).get()
+        if not mentor_doc.exists:
+            return False
+        
+        mentor_data = mentor_doc.to_dict()
+        stats = mentor_data.get('mentorship_stats', {
+            'total_mentees': 0,
+            'active_mentees': 0,
+            'completed_mentorships': 0,
+            'average_rating': 0
+        })
+        
+        if action == 'mentee_added':
+            stats['total_mentees'] += 1
+            stats['active_mentees'] += 1
+        elif action == 'mentee_completed':
+            stats['active_mentees'] = max(0, stats['active_mentees'] - 1)
+            stats['completed_mentorships'] += 1
+        elif action == 'rating_updated':
+            # This would be called with a rating value
+            pass
+        
+        db.collection('collab_users').document(mentor_uid).update({
+            'mentorship_stats': stats,
+            'updated_at': datetime.utcnow().isoformat()
+        })
+        return True
+        
+    except Exception as e:
+        print(f"Error updating mentorship stats: {e}")
+        return False
+
+
+# ============================================================================
+# ADVANCED FEED ALGORITHM
+# ============================================================================
+
+def build_user_interest_profile(uid: str) -> dict:
+    """Generate comprehensive user interest profile for feed personalization"""
+    try:
+        user_doc = db.collection('collab_users').document(uid).get()
+        if not user_doc.exists:
+            return {}
+        
+        user_data = user_doc.to_dict()
+        
+        # Extract explicit interests
+        skills = [skill.get('name', '').lower() for skill in user_data.get('skills', [])]
+        
+        # Extract education interests
+        education_interests = []
+        schools = []
+        for edu in user_data.get('education', []):
+            if isinstance(edu, dict):
+                institution = edu.get('institution', '').lower()
+                field = edu.get('field', '').lower()
+                degree = edu.get('degree', '').lower()
+                
+                if institution:
+                    schools.append(institution)
+                if field:
+                    education_interests.append(field)
+                if degree:
+                    education_interests.append(degree)
+        
+        # Extract experience interests
+        experience_interests = []
+        for exp in user_data.get('experience', []):
+            if isinstance(exp, dict):
+                title = exp.get('title', '').lower()
+                company = exp.get('company', '').lower()
+                
+                if title:
+                    experience_interests.append(title)
+                if company:
+                    experience_interests.append(company)
+        
+        # Extract project interests (tech stack focus)
+        project_interests = []
+        for proj in user_data.get('projects', []):
+            if isinstance(proj, dict):
+                title = proj.get('title', '').lower()
+                description = proj.get('description', '').lower()
+                tech_stack = [tech.lower() for tech in proj.get('tech_stack', [])]
+                
+                if title:
+                    project_interests.append(title)
+                if description:
+                    project_interests.extend(description.split()[:10])  # Top words from description
+                project_interests.extend(tech_stack)
+        
+        # Extract mentorship focus areas
+        mentorship_areas = [area.lower() for area in user_data.get('mentorship_focus_areas', [])]
+        
+        # Combine all interests with weights
+        interest_profile = {
+            'skills': {'items': skills, 'weight': 0.3},
+            'education': {'items': education_interests, 'weight': 0.2},
+            'experience': {'items': experience_interests, 'weight': 0.2},
+            'projects': {'items': project_interests, 'weight': 0.15},
+            'schools': {'items': schools, 'weight': 0.1},
+            'mentorship': {'items': mentorship_areas, 'weight': 0.05}
+        }
+        
+        # Generate semantic embedding for the user
+        all_interests = []
+        for category in interest_profile.values():
+            all_interests.extend(category['items'])
+        
+        if AI_AVAILABLE and all_interests:
+            combined_text = ' '.join(list(set(all_interests)))[:1000]  # Limit text length
+            embedding = get_cached_embedding(combined_text)
+            interest_profile['embedding'] = embedding.tolist() if embedding is not None else None
+        
+        return interest_profile
+        
+    except Exception as e:
+        print(f"Error building user interest profile: {e}")
+        return {}
+
+
+def analyze_post_content(post_data: dict) -> dict:
+    """Analyze post content to extract topics, skills, and educational level"""
+    try:
+        content = post_data.get('content', '')
+        hashtags = [tag.lower() for tag in post_data.get('hashtags', [])]
+        
+        analysis = {
+            'topics': [],
+            'skills': [],
+            'education_level': 'intermediate',  # Default
+            'semantic_embedding': None,
+            'keywords': []
+        }
+        
+        # Extract skills from content using AI semantic matching
+        if AI_AVAILABLE and content:
+            # Common tech skills to look for
+            common_skills = [
+                'python', 'javascript', 'react', 'nodejs', 'java', 'cpp', 'c++',
+                'html', 'css', 'sql', 'mongodb', 'postgresql', 'aws', 'docker',
+                'kubernetes', 'git', 'machine learning', 'ai', 'data science',
+                'tensorflow', 'pytorch', 'flask', 'django', 'vue', 'angular',
+                'mobile', 'android', 'ios', 'swift', 'kotlin', 'flutter',
+                'blockchain', 'web3', 'devops', 'linux', 'ubuntu', 'algorithms'
+            ]
+            
+            skill_matches = get_semantic_matches(content, common_skills, threshold=0.4)
+            analysis['skills'] = [match['text'] for match in skill_matches[:5]]
+        
+        # Extract topics from hashtags and content
+        all_text = f"{content} {' '.join(hashtags)}".lower()
+        
+        # Topic keywords mapping
+        topic_keywords = {
+            'programming': ['code', 'coding', 'program', 'developer', 'software'],
+            'web development': ['web', 'website', 'frontend', 'backend', 'full stack'],
+            'mobile development': ['mobile', 'app', 'android', 'ios', 'flutter'],
+            'data science': ['data', 'analytics', 'statistics', 'visualization'],
+            'machine learning': ['ml', 'ai', 'neural', 'deep learning', 'model'],
+            'career': ['job', 'career', 'internship', 'placement', 'interview'],
+            'education': ['study', 'learn', 'course', 'exam', 'college', 'school'],
+            'design': ['ui', 'ux', 'design', 'interface', 'user experience'],
+            'entrepreneurship': ['startup', 'business', 'entrepreneur', 'founder'],
+            'research': ['research', 'paper', 'study', 'experiment', 'thesis']
+        }
+        
+        for topic, keywords in topic_keywords.items():
+            if any(keyword in all_text for keyword in keywords):
+                analysis['topics'].append(topic)
+        
+        # Determine education level based on content complexity
+        advanced_indicators = ['phd', 'research', 'thesis', 'algorithm', 'optimization', 'architecture']
+        beginner_indicators = ['beginner', 'basic', 'intro', 'tutorial', 'getting started']
+        
+        if any(indicator in all_text for indicator in advanced_indicators):
+            analysis['education_level'] = 'advanced'
+        elif any(indicator in all_text for indicator in beginner_indicators):
+            analysis['education_level'] = 'beginner'
+        
+        # Generate semantic embedding for the post
+        if AI_AVAILABLE and content:
+            embedding = get_cached_embedding(content[:1000])  # Limit text length
+            analysis['semantic_embedding'] = embedding.tolist() if embedding is not None else None
+        
+        # Extract keywords (simple frequency-based)
+        words = content.lower().split()
+        word_freq = {}
+        for word in words:
+            if len(word) > 3:  # Skip short words
+                word_freq[word] = word_freq.get(word, 0) + 1
+        
+        # Get top keywords
+        sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
+        analysis['keywords'] = [word for word, freq in sorted_words[:10]]
+        
+        return analysis
+        
+    except Exception as e:
+        print(f"Error analyzing post content: {e}")
+        return {
+            'topics': [],
+            'skills': [],
+            'education_level': 'intermediate',
+            'semantic_embedding': None,
+            'keywords': []
+        }
+
+
+def calculate_relevance_score(user_profile: dict, post_analysis: dict, user_data: dict) -> float:
+    """Calculate relevance score between user profile and post content"""
+    try:
+        if not user_profile or not post_analysis:
+            return 0.0
+        
+        score = 0.0
+        
+        # Semantic similarity using embeddings
+        if (AI_AVAILABLE and 
+            user_profile.get('embedding') and 
+            post_analysis.get('semantic_embedding')):
+            
+            try:
+                import numpy as np
+                from sklearn.metrics.pairwise import cosine_similarity
+                
+                user_embedding = np.array(user_profile['embedding']).reshape(1, -1)
+                post_embedding = np.array(post_analysis['semantic_embedding']).reshape(1, -1)
+                
+                semantic_similarity = cosine_similarity(user_embedding, post_embedding)[0][0]
+                score += semantic_similarity * 40  # Max 40 points from semantic similarity
+            except Exception as e:
+                print(f"Error calculating semantic similarity: {e}")
+        
+        # Category-based matching
+        for category, category_data in user_profile.items():
+            if category == 'embedding':
+                continue  # Skip embedding, already handled
+                
+            category_items = set(category_data.get('items', []))
+            category_weight = category_data.get('weight', 0.1)
+            
+            if not category_items:
+                continue
+            
+            # Match with post skills
+            if category == 'skills':
+                post_skills = set(post_analysis.get('skills', []))
+                matches = category_items & post_skills
+                score += len(matches) * category_weight * 20
+            
+            # Match with post topics
+            elif category == 'education' or category == 'experience':
+                post_topics = set(post_analysis.get('topics', []))
+                matches = category_items & post_topics
+                score += len(matches) * category_weight * 15
+            
+            # Match with post keywords
+            else:
+                post_keywords = set(post_analysis.get('keywords', []))
+                matches = category_items & post_keywords
+                score += len(matches) * category_weight * 10
+        
+        # Education level alignment
+        user_education_level = 'intermediate'  # Default, could be inferred from user profile
+        post_education_level = post_analysis.get('education_level', 'intermediate')
+        
+        education_alignment = {
+            'beginner': {'beginner': 10, 'intermediate': 5, 'advanced': 2},
+            'intermediate': {'beginner': 5, 'intermediate': 10, 'advanced': 5},
+            'advanced': {'beginner': 2, 'intermediate': 5, 'advanced': 10}
+        }
+        
+        score += education_alignment.get(user_education_level, {}).get(post_education_level, 0)
+        
+        return min(score, 100)  # Cap at 100
+        
+    except Exception as e:
+        print(f"Error calculating relevance score: {e}")
+        return 0.0
+
+
+def calculate_social_proof_score(post_author_uid: str, viewer_uid: str, post_data: dict) -> float:
+    """Calculate social proof score based on network relationships"""
+    try:
+        score = 0.0
+        
+        # Check if author is connected to viewer
+        if is_connected(viewer_uid, post_author_uid):
+            score += 30  # Strong boost for connections
+        
+        # Check mutual connections
+        mutual_count = get_mutual_connections(viewer_uid, post_author_uid)
+        if mutual_count > 0:
+            score += min(mutual_count * 5, 20)  # Diminishing returns
+        
+        # Check if viewer follows author
+        try:
+            follow_doc = db.collection('follows') \
+                          .where(filter=firestore.FieldFilter('follower_uid', '==', viewer_uid)) \
+                          .where(filter=firestore.FieldFilter('following_uid', '==', post_author_uid)) \
+                          .get()
+            if len(follow_doc) > 0:
+                score += 15
+        except:
+            pass
+        
+        # Author credibility boost
+        author_doc = db.collection('collab_users').document(post_author_uid).get()
+        if author_doc.exists:
+            author_data = author_doc.to_dict()
+            
+            # Verified users
+            if author_data.get('verified', False):
+                score += 10
+            
+            # High connection count
+            connection_count = author_data.get('connection_count', 0)
+            if connection_count > 50:
+                score += 5
+            elif connection_count > 20:
+                score += 3
+            
+            # High follower count
+            follower_count = author_data.get('follower_count', 0)
+            if follower_count > 100:
+                score += 5
+            elif follower_count > 50:
+                score += 3
+        
+        return min(score, 50)  # Cap at 50
+        
+    except Exception as e:
+        print(f"Error calculating social proof score: {e}")
+        return 0.0
+
+
+def is_connected(uid_a: str, uid_b: str) -> bool:
+    """Check if two users are connected"""
+    try:
+        pair   = sorted([uid_a, uid_b])
+        conn_id = f"{pair[0]}_{pair[1]}"
+        doc    = db.collection('connections').document(conn_id).get()
+        return doc.exists and doc.to_dict().get('status') == 'accepted'
+    except Exception:
+        return False
+
+
+def calculate_freshness_score(created_at: str, current_time: datetime = None) -> float:
+    """Calculate freshness score with time decay"""
+    try:
+        if current_time is None:
+            current_time = datetime.utcnow()
+        
+        post_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+        hours_old = (current_time - post_time).total_seconds() / 3600
+        
+        # Time decay function
+        if hours_old < 1:
+            return 10  # Very fresh
+        elif hours_old < 6:
+            return 8
+        elif hours_old < 24:
+            return 6
+        elif hours_old < 72:
+            return 4
+        elif hours_old < 168:  # 1 week
+            return 2
+        else:
+            return 1  # Old content
+            
+    except Exception as e:
+        print(f"Error calculating freshness score: {e}")
+        return 1.0
+
+
+def get_personalized_feed(uid: str, limit: int = 20, cursor: str = None) -> dict:
+    """Advanced personalized feed algorithm"""
+    try:
+        # Get user profile and interest profile
+        user_doc = db.collection('collab_users').document(uid).get()
+        if not user_doc.exists:
+            return {'posts': [], 'next_cursor': None, 'has_more': False}
+        
+        user_data = user_doc.to_dict()
+        
+        user_interest_profile = build_user_interest_profile(uid)
+        
+        # Get user's connections for visibility filtering
+        connected_users = set()
+        follows = set()
+        
+        try:
+            conn_snap = db.collection('connections') \
+                          .where(filter=firestore.FieldFilter('participants', 'array_contains', uid)) \
+                          .where(filter=firestore.FieldFilter('status', '==', 'accepted')) \
+                          .get()
+            for conn in conn_snap:
+                for participant in conn.to_dict().get('participants', []):
+                    if participant != uid:
+                        connected_users.add(participant)
+        except Exception as e:
+            print(f"Error getting connections for feed: {e}")
+        
+        try:
+            follow_snap = db.collection('follows') \
+                            .where(filter=firestore.FieldFilter('follower_uid', '==', uid)) \
+                            .get()
+            for follow in follow_snap:
+                follows.add(follow.to_dict().get('following_uid'))
+        except Exception as e:
+            print(f"Error getting follows for feed: {e}")
+        
+        # Build base query - fetch many more candidates for better personalization
+        # Get a large pool of posts to ensure we have enough quality content after filtering
+        candidate_limit = max(100, limit * 10)  # Get at least 100 candidates or 10x the requested limit
+        query = db.collection('posts') \
+                  .where(filter=firestore.FieldFilter('deleted', '==', False)) \
+                  .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                  .limit(candidate_limit)
+        
+        # Apply cursor if provided
+        if cursor:
+            try:
+                cursor_data = json.loads(base64.b64decode(cursor).decode())
+                last_created_at = cursor_data.get('created_at')
+                if last_created_at:
+                    query = query.start_after({'created_at': last_created_at})
+            except Exception as e:
+                print(f"Error parsing cursor: {e}")
+        
+        # Execute query
+        posts_snap = query.get()
+        
+        # Process and score posts
+        scored_posts = []
+        current_time = datetime.utcnow()
+        filtered_count = 0
+        own_posts_skipped = 0
+        visibility_filtered = 0
+        
+        for post_doc in posts_snap:
+            post = post_doc.to_dict()
+            post['post_id'] = post_doc.id
+            author_uid = post.get('author_uid')
+            
+            # Skip own posts for feed (optional, can be removed)
+            if author_uid == uid:
+                own_posts_skipped += 1
+                continue
+            
+            # Visibility filtering
+            visibility = post.get('visibility', 'public')
+            include_post = True
+            
+            if visibility == 'private':
+                include_post = author_uid == uid
+            elif visibility == 'connections':
+                include_post = author_uid in connected_users or author_uid in follows
+            
+            if not include_post:
+                visibility_filtered += 1
+                continue
+            
+            filtered_count += 1
+            
+            # Get author info - check both collab_users and users collections
+            author_doc = db.collection('collab_users').document(author_uid).get()
+            if not author_doc.exists:
+                # Try the original users collection
+                author_doc = db.collection('users').document(author_uid).get()
+                if not author_doc.exists:
+                    # Create minimal author data to avoid dropping the post
+                    author_data = {
+                        'name': 'Unknown User',
+                        'headline': '',
+                        'profile_picture': '',
+                        'verified': False
+                    }
+                else:
+                    author_data = author_doc.to_dict()
+                    # Ensure required fields exist
+                    author_data.setdefault('name', 'Unknown User')
+                    author_data.setdefault('headline', '')
+                    author_data.setdefault('profile_picture', '')
+                    author_data.setdefault('verified', False)
+            else:
+                author_data = author_doc.to_dict()
+            
+            # Analyze post content
+            post_analysis = analyze_post_content(post)
+            
+            # Calculate multi-factor scores
+            try:
+                relevance_score = calculate_relevance_score(user_interest_profile, post_analysis, user_data)
+            except Exception as e:
+                print(f"⚠️  Relevance scoring error for post {post['post_id']}: {e}")
+                relevance_score = 0.0
+            
+            # Engagement score (existing logic)
+            engagement_score = (
+                post.get('reaction_counts', {}).get('insightful', 0) * 3 +
+                post.get('reaction_counts', {}).get('motivating', 0) * 2 +
+                post.get('reaction_counts', {}).get('support', 0) * 1 +
+                post.get('comment_count', 0) * 2 +
+                post.get('share_count', 0) * 5
+            )
+            
+            try:
+                social_proof_score = calculate_social_proof_score(author_uid, uid, post)
+            except Exception as e:
+                print(f"⚠️  Social proof scoring error for post {post['post_id']}: {e}")
+                social_proof_score = 0.0
+                
+            try:
+                freshness_score = calculate_freshness_score(post.get('created_at'), current_time)
+            except Exception as e:
+                print(f"⚠️  Freshness scoring error for post {post['post_id']}: {e}")
+                freshness_score = 0.0
+            
+            # Calculate final weighted score
+            final_score = (
+                relevance_score * 0.4 +      # 40% relevance
+                min(engagement_score, 100) * 0.3 +  # 30% engagement (capped)
+                social_proof_score * 0.2 +     # 20% social proof
+                freshness_score * 0.1         # 10% freshness
+            )
+            
+            # Add author info to post
+            post.update({
+                'author_name': author_data.get('name', 'Unknown'),
+                'author_initials': get_initials(author_data.get('name', 'Unknown')),
+                'author_headline': author_data.get('headline', ''),
+                'author_picture': author_data.get('profile_picture', ''),
+                'author_verified': author_data.get('verified', False),
+                'relevance_score': relevance_score,
+                'engagement_score': engagement_score,
+                'social_proof_score': social_proof_score,
+                'freshness_score': freshness_score,
+                'final_score': final_score,
+                'post_analysis': post_analysis
+            })
+            
+            scored_posts.append(post)
+        
+        # Sort by final score
+        scored_posts.sort(key=lambda x: x['final_score'], reverse=True)
+        
+        # Apply diversity constraints (avoid content clustering)
+        diversified_posts = []
+        used_topics = set()
+        used_authors = set()
+        
+        for post in scored_posts:
+            topics = set(post.get('post_analysis', {}).get('topics', []))
+            author = post.get('author_uid')
+            
+            # Limit posts from same author
+            if len(used_authors) >= 3 and author in used_authors:
+                continue
+            
+            # Limit posts on same topic
+            topic_overlap = len(topics & used_topics)
+            if topic_overlap > 2:  # Allow some topic overlap
+                continue
+            
+            diversified_posts.append(post)
+            used_topics.update(topics)
+            used_authors.add(author)
+            
+            if len(diversified_posts) >= limit:
+                break
+        
+        # If we don't have enough posts, add more from remaining scored posts
+        if len(diversified_posts) < limit:
+            remaining_posts = [p for p in scored_posts if p not in diversified_posts]
+            diversified_posts.extend(remaining_posts[:limit - len(diversified_posts)])
+        
+        # Generate next cursor
+        next_cursor = None
+        has_more = False
+        
+        if len(diversified_posts) > 0:
+            last_post = diversified_posts[-1]
+            cursor_data = {
+                'created_at': last_post.get('created_at')
+            }
+            next_cursor = base64.b64encode(
+                json.dumps(cursor_data).encode()
+            ).decode()
+            has_more = len(scored_posts) > limit
+        
+        return {
+            'posts': diversified_posts[:limit],
+            'next_cursor': next_cursor,
+            'has_more': has_more,
+            'total_fetched': len(diversified_posts),
+            'algorithm_info': {
+                'candidate_limit': candidate_limit,
+                'total_candidates': len(scored_posts),
+                'avg_relevance_score': sum(p['relevance_score'] for p in diversified_posts) / len(diversified_posts) if diversified_posts else 0,
+                'diversified': True,
+                'posts_returned': len(diversified_posts)
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error getting personalized feed: {e}")
+        # Fallback to existing get_feed_posts function
+        return get_feed_posts(uid, cursor, limit)
+
+
+def track_user_interaction(uid: str, post_id: str, interaction_type: str, metadata: dict = None):
+    """Track user interactions with posts for algorithm improvement"""
+    try:
+        interaction_data = {
+            'user_uid': uid,
+            'post_id': post_id,
+            'interaction_type': interaction_type,  # 'view', 'like', 'comment', 'share', 'save'
+            'created_at': datetime.utcnow().isoformat(),
+            'metadata': metadata or {}
+        }
+        
+        # Store interaction in Firestore
+        db.collection('user_interactions').add(interaction_data)
+        
+        # Update post engagement counters
+        post_ref = db.collection('posts').document(post_id)
+        
+        if interaction_type == 'like':
+            # This would be called when a user reacts to a post
+            pass  # Reaction handling is already implemented elsewhere
+        elif interaction_type == 'comment':
+            post_ref.update({'comment_count': firestore.Increment(1)})
+        elif interaction_type == 'share':
+            post_ref.update({'share_count': firestore.Increment(1)})
+        elif interaction_type == 'view':
+            post_ref.update({'view_count': firestore.Increment(1)})
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error tracking user interaction: {e}")
+        return False
+
+
+def get_user_interest_insights(uid: str) -> dict:
+    """Get insights about user's content interests based on interactions"""
+    try:
+        # Get user's recent interactions
+        interactions_snap = db.collection('user_interactions') \
+                               .where(filter=firestore.FieldFilter('user_uid', '==', uid)) \
+                               .order_by('created_at', direction=firestore.Query.DESCENDING) \
+                               .limit(100) \
+                               .get()
+        
+        # Analyze interaction patterns
+        interaction_topics = {}
+        interaction_skills = {}
+        interaction_authors = {}
+        
+        for interaction_doc in interactions_snap:
+            interaction = interaction_doc.to_dict()
+            post_id = interaction.get('post_id')
+            
+            # Get post details
+            post_doc = db.collection('posts').document(post_id).get()
+            if post_doc.exists:
+                post_data = post_doc.to_dict()
+                post_analysis = analyze_post_content(post_data)
+                
+                # Track topics
+                for topic in post_analysis.get('topics', []):
+                    interaction_topics[topic] = interaction_topics.get(topic, 0) + 1
+                
+                # Track skills
+                for skill in post_analysis.get('skills', []):
+                    interaction_skills[skill] = interaction_skills.get(skill, 0) + 1
+                
+                # Track authors
+                author_uid = post_data.get('author_uid')
+                if author_uid:
+                    interaction_authors[author_uid] = interaction_authors.get(author_uid, 0) + 1
+        
+        # Sort by frequency
+        top_topics = sorted(interaction_topics.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_skills = sorted(interaction_skills.items(), key=lambda x: x[1], reverse=True)[:10]
+        top_authors = sorted(interaction_authors.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        return {
+            'top_topics': [{'topic': topic, 'count': count} for topic, count in top_topics],
+            'top_skills': [{'skill': skill, 'count': count} for skill, count in top_skills],
+            'top_authors': [{'author_uid': uid, 'count': count} for uid, count in top_authors],
+            'total_interactions': len(interactions_snap)
+        }
+        
+    except Exception as e:
+        print(f"Error getting user interest insights: {e}")
+        return {
+            'top_topics': [],
+            'top_skills': [],
+            'top_authors': [],
+            'total_interactions': 0
+        }

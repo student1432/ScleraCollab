@@ -1,0 +1,837 @@
+{% extends "collab_base.html" %}
+{% block title %}Feed — ScleraCollab{% endblock %}
+
+{% block head %}
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="grid-3">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sb-l" style="display:flex;flex-direction:column;gap:1rem;position:-webkit-stickys;top:76px;">
+
+      <!-- Profile Summary Island -->
+      <div class="island island-pad" style="text-align:center;">
+        <div style="position:relative;margin:-1.5rem -1.5rem 0;height:64px;overflow:hidden;border-radius:1.25rem 1.25rem 0 0;">
+          {% if profile.profile_banner %}
+            <img src="{{ url_for('serve_media', filename=profile.profile_banner) }}" style="width:100%;height:100%;object-fit:cover;">
+          {% else %}
+            <div style="width:100%;height:100%;background:linear-gradient(135deg,#22c55e22,#3b82f622,#a78bfa22);"></div>
+          {% endif %}
+        </div>
+        <div style="margin-top:-28px;display:flex;justify-content:center;margin-bottom:0.75rem;">
+          {% if profile.profile_picture %}
+            <img src="{{ url_for('serve_media', filename=profile.profile_picture) }}"
+                 class="avatar avatar-lg" style="border:3px solid var(--island);"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div class="avatar-init avatar-init-lg" style="display:none;border-color:var(--island);">{{ initials }}</div>
+          {% else %}
+            <div class="avatar-init avatar-init-lg" style="border-color:var(--island);">{{ initials }}</div>
+          {% endif %}
+        </div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:0.2rem;">{{ profile.name }}</div>
+        {% if profile.headline %}
+          <div class="text-muted" style="font-size:0.8rem;margin-bottom:0.75rem;line-height:1.4;">{{ profile.headline }}</div>
+        {% else %}
+          <a href="{{ url_for('profile_edit') }}" class="text-muted" style="font-size:0.78rem;display:block;margin-bottom:0.75rem;">+ Add a headline</a>
+        {% endif %}
+        <div class="divider"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.75rem;">
+          <div><div style="font-size:1rem;font-weight:700;color:var(--accent);">{{ profile.connection_count or 0 }}</div><div class="text-muted" style="font-size:0.68rem;">Connections</div></div>
+          <div><div style="font-size:1rem;font-weight:700;color:#3b82f6;">{{ profile.follower_count or 0 }}</div><div class="text-muted" style="font-size:0.68rem;">Followers</div></div>
+          <div><div style="font-size:1rem;font-weight:700;color:#a78bfa;">{{ profile.post_count or 0 }}</div><div class="text-muted" style="font-size:0.68rem;">Posts</div></div>
+        </div>
+        <a href="{{ url_for('profile_view', uid=profile.uid) }}" class="btn btn-secondary" style="width:100%;justify-content:center;">View Profile</a>
+      </div>
+
+      <!-- Create Post Button -->
+      <button onclick="openPostModal()" class="btn btn-primary" style="width:100%;justify-content:center;">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right:0.5rem;">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Create Post
+      </button>
+      
+      <!-- Debug Button -->
+      <!-- <button onclick="debugPostCreation()" class="btn btn-secondary" style="width:100%;justify-content:center;margin-top:0.5rem;font-size:0.8rem;">
+        🔍 Debug Post Creation
+      </button> -->
+      
+      <!-- Test Modal Visibility -->
+      <!-- <button onclick="testModalVisibility()" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:0.25rem;font-size:0.7rem;">
+        👁 Test Modal
+      </button> -->
+      
+      <!-- Test Form -->
+      <!-- <button onclick="testForm()" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:0.25rem;font-size:0.7rem;">
+        📝 Test Form
+      </button> -->
+      
+      <!-- Test Post Creation -->
+      <!-- <button onclick="testPostCreation()" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:0.25rem;font-size:0.7rem;">
+        🚀 Test Post
+      </button> -->
+      
+      <!-- Test Feed Visibility -->
+      <!-- <button onclick="testFeedVisibility()" class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;margin-top:0.25rem;font-size:0.7rem;">
+        👁 Test Feed
+      </button> -->
+
+      <!-- Profile Completion -->
+      {% if completion and completion.score < 100 %}
+      <div class="island island-pad">
+        <div class="island-label">Profile Strength</div>
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+          <svg width="64" height="64" viewBox="0 0 64 64" style="transform:rotate(-90deg);flex-shrink:0;">
+            <circle fill="none" cx="32" cy="32" r="26" stroke="var(--border)" stroke-width="5"/>
+            <circle fill="none" cx="32" cy="32" r="26"
+                    stroke="{{ completion.milestone_color }}" stroke-width="5"
+                    stroke-linecap="round"
+                    stroke-dasharray="{{ 2 * 3.14159 * 26 }}"
+                    stroke-dashoffset="{{ 2 * 3.14159 * 26 * (1 - completion.score / 100) }}"/>
+          </svg>
+          <div>
+            <div style="font-size:1.4rem;font-weight:800;letter-spacing:-0.03em;">{{ completion.score }}<span style="font-size:0.8rem;font-weight:500;color:var(--muted);">%</span></div>
+            <div style="font-size:0.76rem;font-weight:600;color:{{ completion.milestone_color }};">{{ completion.milestone }}</div>
+          </div>
+        </div>
+        {% if completion.next_action %}
+        <div style="background:var(--island-h);border-radius:0.75rem;padding:0.75rem;margin-bottom:0.75rem;">
+          <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.2rem;">NEXT STEP</div>
+          <div style="font-size:0.82rem;font-weight:500;">{{ completion.next_action.label }}</div>
+        </div>
+        {% endif %}
+        <a href="{{ url_for('profile_edit') }}{% if completion.next_action and completion.next_action.section %}#{{ completion.next_action.section }}{% endif %}"
+           class="btn btn-primary" style="width:100%;justify-content:center;font-size:0.8rem;">
+          Improve Profile
+        </a>
+      </div>
+      {% endif %}
+    </aside>
+
+    <!-- MAIN FEED -->
+    <main class="feed-main">
+      <!-- Feed Container -->
+      <div id="feed-container">
+        {% if posts %}
+          {% for post in posts %}
+            <div class="island island-pad" style="margin-bottom:1rem;" data-post-id="{{ post.post_id }}">
+              <!-- Post Header -->
+              <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+                {% if post.author_picture %}
+                  <img src="{{ url_for('serve_media', filename=post.author_picture) }}" class="avatar">
+                {% else %}
+                  <div class="avatar-init">{{ post.author_initials }}</div>
+                {% endif %}
+                <div style="flex:1;min-width:0;">
+                  <a href="{{ url_for('profile_view', uid=post.author_uid) }}" style="font-weight:600;color:var(--text);text-decoration:none;">{{ post.author_name }}</a>
+                  {% if post.author_headline %}
+                    <div class="text-muted" style="font-size:0.78rem;">{{ post.author_headline }}</div>
+                  {% endif %}
+                </div>
+                <div class="text-muted" style="font-size:0.72rem;">{{ post.created_at[:10] }}</div>
+              </div>
+
+              <!-- Post Content -->
+              <div style="margin-bottom:1rem;line-height:1.5;">{{ post.content|safe }}</div>
+
+              <!-- Post Images (if any) -->
+              {% if post.images %}
+                <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:0.5rem;margin-bottom:1rem;">
+                  {% for image in post.images %}
+                    <img src="{{ url_for('serve_media', filename=image) }}" style="width:100%;height:150px;object-fit:cover;border-radius:0.5rem;">
+                  {% endfor %}
+                </div>
+              {% endif %}
+
+              <!-- Post Hashtags -->
+              {% if post.hashtags %}
+                <div style="display:flex;flex-wrap:wrap;gap:0.25rem;margin-bottom:1rem;">
+                  {% for hashtag in post.hashtags %}
+                    <a href="/collab/hashtag/{{ hashtag }}" class="chip chip-n" style="font-size:0.72rem;text-decoration:none;">#{{ hashtag }}</a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+
+              <!-- Post Actions -->
+              <div style="display:flex;align-items:center;gap:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+                <!-- Reactions -->
+                <div style="display:flex;gap:0.5rem;">
+                  <button onclick="toggleReaction('{{ post.post_id }}', 'insightful')" class="reaction-btn {{ 'active' if post.user_reaction == 'insightful' else '' }}" data-reaction="insightful">
+                    <span style="font-size:1.2rem;">💡</span>
+                    <span style="font-size:0.78rem;">{{ post.reaction_counts.insightful or 0 }}</span>
+                  </button>
+                  <button onclick="toggleReaction('{{ post.post_id }}', 'motivating')" class="reaction-btn {{ 'active' if post.user_reaction == 'motivating' else '' }}" data-reaction="motivating">
+                    <span style="font-size:1.2rem;">🔥</span>
+                    <span style="font-size:0.78rem;">{{ post.reaction_counts.motivating or 0 }}</span>
+                  </button>
+                  <button onclick="toggleReaction('{{ post.post_id }}', 'support')" class="reaction-btn {{ 'active' if post.user_reaction == 'support' else '' }}" data-reaction="support">
+                    <span style="font-size:1.2rem;">🤝</span>
+                    <span style="font-size:0.78rem;">{{ post.reaction_counts.support or 0 }}</span>
+                  </button>
+                </div>
+
+                <!-- Other Actions -->
+                <button onclick="openComments('{{ post.post_id }}')" style="display:flex;align-items:center;gap:0.25rem;color:var(--text-muted);font-size:0.78rem;">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                  </svg>
+                  {{ post.comment_count or 0 }}
+                </button>
+                
+                <button onclick="sharePost('{{ post.post_id }}')" style="color:var(--text-muted);font-size:0.78rem;">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z"/>
+                  </svg>
+                  Share
+                </button>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <!-- Empty State -->
+          <div class="island island-pad" style="text-align:center;padding:3rem 2rem;">
+            <div style="width:56px;height:56px;background:var(--accent-dim);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;">
+              <svg width="28" height="28" fill="none" stroke="var(--accent)" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            </div>
+            <div style="font-size:1rem;font-weight:600;margin-bottom:0.5rem;">Your feed is getting ready</div>
+            <div class="text-muted" style="font-size:0.84rem;max-width:300px;margin:0 auto 1.5rem;">Connect with peers and start posting to see content here.</div>
+            <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">
+              <button onclick="openPostModal()" class="btn btn-primary btn-sm">Create Your First Post</button>
+              <a href="/collab/network" class="btn btn-secondary btn-sm">Find Connections</a>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Load More Button -->
+      {% if has_more %}
+        <button onclick="loadMorePosts()" id="load-more-btn" class="btn btn-secondary" style="width:100%;margin-top:1rem;">
+          Load More Posts
+        </button>
+      {% endif %}
+    </main>
+
+    <!-- RIGHT SIDEBAR -->
+    <aside class="sb-r" style="display:flex;flex-direction:column;gap:1rem;position:sticky;top:76px;">
+      <!-- People you may know -->
+      <div class="island island-pad">
+        <div class="sec-head">
+          <div class="island-label" style="margin-bottom:0;">People you may know</div>
+          <a href="/network/suggestions" class="btn btn-ghost btn-sm" style="font-size:0.72rem;">See all</a>
+        </div>
+        {% if connections_preview %}
+        <div style="display:flex;flex-direction:column;gap:0.75rem;">
+          {% for conn in connections_preview %}
+          <div style="display:flex;align-items:center;gap:0.75rem;">
+            {% if conn.profile_picture %}
+              <img src="{{ url_for('serve_media', filename=conn.profile_picture) }}" class="avatar">
+            {% else %}
+              <div class="avatar-init">{{ conn.initials }}</div>
+            {% endif %}
+            <div style="flex:1;min-width:0;">
+              <a href="{{ url_for('profile_view', uid=conn.uid) }}" style="font-size:0.82rem;font-weight:600;color:var(--text);text-decoration:none;display:block;" class="clamp-2">{{ conn.name }}</a>
+              <div class="text-muted clamp-2" style="font-size:0.72rem;">{{ conn.headline or '' }}</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted" style="font-size:0.82rem;text-align:center;padding:1rem 0;">Connect with peers to see suggestions.</div>
+        <a href="/collab/search" class="btn btn-secondary btn-sm" style="width:100%;justify-content:center;margin-top:0.5rem;">Find People</a>
+        {% endif %}
+      </div>
+
+      <!-- Trending tags -->
+      <div class="island island-pad">
+        <div class="island-label">Trending Topics</div>
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+          {% for tag in ['#StudyTips','#Python','#Internship','#OpenSource','#AI','#Mathematics','#Physics','#Research'] %}
+          <a href="/collab/hashtag/{{ tag[1:] }}" class="chip chip-n" style="font-size:0.72rem;text-decoration:none;">{{ tag }}</a>
+          {% endfor %}
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- Create post modal placeholder -->
+<!-- Post Creation Modal -->
+<div class="modal-bg" id="createPostModal" style="display:none;pointer-events:auto !important;">
+  <div class="modal" style="max-width:600px;pointer-events:auto !important;">
+    <div class="modal-head">
+      <span class="modal-title">Create Post</span>
+      <button class="btn btn-ghost btn-sm" onclick="closePostModal()">✕</button>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <textarea id="postContent" name="postContent" class="input" rows="5" placeholder="What's on your mind?" style="resize:vertical;"></textarea>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+      <button class="btn btn-ghost btn-sm" onclick="addImage()">📷 Image</button>
+      <button class="btn btn-ghost btn-sm" onclick="addLink()">🔗 Link</button>
+      <select id="postVisibility" class="input" style="width:auto;padding:0.25rem 0.5rem;font-size:0.8rem;">
+        <option value="public">🌍 Public</option>
+        <option value="connections">👥 Connections</option>
+      </select>
+    </div>
+    <div id="postPreview" style="margin-bottom:1rem;"></div>
+    <div class="divider"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span id="postCharCount" class="text-muted" style="font-size:0.76rem;">0/2000 characters</span>
+      <button id="postBtn" class="btn btn-primary" onclick="createPost()" disabled>Post</button>
+    </div>
+  </div>
+</div>
+
+<!-- JavaScript -->
+<script>
+// Initialize SocketIO
+const socket = io();
+
+// Global variables
+let nextCursor = "{{ next_cursor or '' }}";
+let isLoading = false;
+
+// SocketIO event handlers
+socket.on('connect', () => {
+  console.log('Connected to SocketIO');
+});
+
+socket.on('post_reaction', (data) => {
+  updateReactionCounts(data.post_id, data.reaction_counts);
+});
+
+socket.on('post_reaction_removed', (data) => {
+  updateReactionCounts(data.post_id, data.reaction_counts);
+});
+
+socket.on('new_comment', (data) => {
+  // Update comment count if on post page
+  const postElement = document.querySelector(`[data-post-id="${data.post_id}"]`);
+  if (postElement) {
+    const commentBtn = postElement.querySelector('button[onclick*="openComments"]');
+    if (commentBtn) {
+      const currentCount = parseInt(commentBtn.textContent.trim()) || 0;
+      commentBtn.innerHTML = `
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+        </svg>
+        ${currentCount + 1}
+      `;
+    }
+  }
+});
+
+// Post creation functions
+function openPostModal() {
+  console.log('Opening post modal...');
+  const modal = document.getElementById('createPostModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.style.visibility = 'visible';
+    modal.style.opacity = '1';
+    document.getElementById('postContent').focus();
+    console.log('Post modal opened successfully');
+    console.log('Modal display:', modal.style.display);
+    console.log('Modal visibility:', modal.style.visibility);
+    console.log('Modal opacity:', modal.style.opacity);
+    console.log('Modal z-index:', modal.style.zIndex);
+    
+    // Check if modal is actually visible
+    setTimeout(() => {
+      const rect = modal.getBoundingClientRect();
+      console.log('Modal rect:', rect);
+      console.log('Modal is visible:', rect.width > 0 && rect.height > 0);
+    }, 100);
+  } else {
+    console.error('Post modal not found!');
+  }
+}
+
+function closePostModal() {
+  const modal = document.getElementById('createPostModal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+  if (postContent) {
+    postContent.value = '';
+  }
+  const postPreview = document.getElementById('postPreview');
+  if (postPreview) {
+    postPreview.innerHTML = '';
+  }
+  if (postCharCount) {
+    postCharCount.textContent = '0/2000 characters';
+  }
+  if (postBtn) {
+    postBtn.disabled = true;
+  }
+}
+
+// Character counter
+const postContent = document.getElementById('postContent');
+const postCharCount = document.getElementById('postCharCount');
+const postBtn = document.getElementById('postBtn');
+
+if (postContent) {
+  postContent.addEventListener('input', (e) => {
+    const length = e.target.value.length;
+    if (postCharCount) {
+      postCharCount.textContent = `${length}/2000 characters`;
+    }
+    if (postBtn) {
+      postBtn.disabled = length === 0 || length > 2000;
+    }
+  });
+} else {
+  console.error('postContent textarea not found!');
+}
+
+// Test form functionality
+function testForm() {
+  console.log('=== TESTING FORM FUNCTIONALITY ===');
+  
+  if (!postContent || !postBtn) {
+    console.error('Form elements not found!');
+    return;
+  }
+  
+  // Test typing
+  console.log('Testing typing...');
+  postContent.value = 'Test post content #formtest';
+  console.log('Content after typing:', postContent.value);
+  
+  // Test button
+  console.log('Testing button state...');
+  console.log('Button disabled:', postBtn.disabled);
+  
+  // Test character counter
+  console.log('Character count:', postCharCount.textContent);
+  
+  // Test post creation
+  console.log('Testing post creation...');
+  if (postBtn.disabled) {
+    console.log('Button is disabled, enabling it for testing');
+    postBtn.disabled = false;
+  }
+  
+  console.log('=== FORM TEST COMPLETE ===');
+}
+
+// Test feed visibility
+function testFeedVisibility() {
+  console.log('=== TESTING FEED VISIBILITY ===');
+  
+  const feedContainer = document.getElementById('feed-container');
+  console.log('Feed container:', feedContainer);
+  
+  if (feedContainer) {
+    const rect = feedContainer.getBoundingClientRect();
+    console.log('Feed container rect:', rect);
+    console.log('Feed container visible:', rect.width > 0 && rect.height > 0);
+    console.log('Feed container children:', feedContainer.children.length);
+    console.log('Feed container computed style:', window.getComputedStyle(feedContainer).display);
+    
+    // Add a visible test post
+    const testPost = document.createElement('div');
+    testPost.className = 'island island-pad';
+    testPost.style.padding = '1.5rem';
+    testPost.style.background = 'var(--island)';
+    testPost.style.border = '2px solid #22c55e';
+    testPost.style.borderRadius = '1rem';
+    testPost.style.marginBottom = '1rem';
+    testPost.innerHTML = `
+      <div style="font-weight:600;color:var(--text);margin-bottom:0.5rem;">🧪 Test Post - Feed Visibility Check</div>
+      <div style="color:var(--text-muted);margin-bottom:0.5rem;">This is a test post to verify the feed is working.</div>
+      <div style="font-size:0.8rem;color:var(--accent);">If you can see this, the feed is working!</div>
+    `;
+    
+    feedContainer.insertBefore(testPost, feedContainer.firstChild);
+    console.log('Test post added to feed');
+    
+  } else {
+    console.error('Feed container not found!');
+  }
+  
+  console.log('=== FEED VISIBILITY TEST COMPLETE ===');
+}
+
+// Test post creation
+function testPostCreation() {
+  console.log('=== TESTING POST CREATION ===');
+  
+  // First open modal
+  openPostModal();
+  
+  // Wait a bit then fill form and submit
+  setTimeout(() => {
+    console.log('Filling form...');
+    
+    if (postContent) {
+      postContent.value = 'Test post from frontend #FrontendTest #Phase3A';
+      console.log('Content filled:', postContent.value);
+    }
+    
+    if (postCharCount) {
+      postCharCount.textContent = '47/2000 characters';
+    }
+    
+    if (postBtn) {
+      postBtn.disabled = false;
+      console.log('Button enabled');
+    }
+    
+    // Try to create the post
+    setTimeout(() => {
+      console.log('Attempting to create post...');
+      createPost();
+    }, 1000);
+    
+  }, 500);
+}
+
+// Create post
+async function createPost() {
+  console.log('Creating post...');
+  const content = document.getElementById('postContent').value.trim();
+  const visibility = document.getElementById('postVisibility').value;
+  
+  console.log('Content:', content);
+  console.log('Visibility:', visibility);
+  
+  if (!content) {
+    console.log('No content provided, returning');
+    return;
+  }
+  
+  const postBtn = document.getElementById('postBtn');
+  postBtn.disabled = true;
+  postBtn.textContent = 'Posting...';
+  
+  try {
+    console.log('Sending request to /api/collab/posts...');
+    const response = await fetch('/api/collab/posts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        content: content,
+        visibility: visibility,
+        type: 'post'
+      })
+    });
+    
+    console.log('Response status:', response.status);
+    const data = await response.json();
+    console.log('Response data:', data);
+    
+    if (data.success) {
+      console.log('Post created successfully!');
+      closePostModal();
+      // Add new post to top of feed
+      addPostToFeed(data.post);
+    } else {
+      console.error('Post creation failed:', data.error);
+      alert(data.error || 'Failed to create post');
+    }
+  } catch (error) {
+    console.error('Error creating post:', error);
+    alert('Failed to create post: ' + error.message);
+  } finally {
+    postBtn.disabled = false;
+    postBtn.textContent = 'Post';
+  }
+}
+
+// Add post to feed
+function addPostToFeed(post) {
+  console.log('Adding post to feed:', post);
+  const feedContainer = document.getElementById('feed-container');
+  if (feedContainer) {
+    const postElement = createPostElement(post);
+    feedContainer.insertBefore(postElement, feedContainer.firstChild);
+    console.log('Post added to feed successfully!');
+    console.log('Feed container now has', feedContainer.children.length, 'children');
+    
+    // Debug: Check if the post is actually visible
+    setTimeout(() => {
+      const rect = postElement.getBoundingClientRect();
+      console.log('Post element rect:', rect);
+      console.log('Post element visible:', rect.width > 0 && rect.height > 0);
+      console.log('Post element computed style:', window.getComputedStyle(postElement).display);
+    }, 100);
+  } else {
+    console.error('Feed container not found!');
+  }
+}
+
+// Create post element
+function createPostElement(post) {
+  console.log('Creating post element with data:', post);
+  
+  const div = document.createElement('div');
+  div.className = 'island island-pad';
+  div.style.marginBottom = '1rem';
+  div.style.padding = '1.5rem';
+  div.style.background = 'var(--island)';
+  div.style.borderRadius = '1rem';
+  div.style.border = '1px solid var(--border)';
+  div.dataset.postId = post.post_id;
+  
+  // Safe access to author info - using flat structure from get_feed_posts
+  const authorName = post.author_name || 'Unknown';
+  const authorInitials = post.author_initials || '?';
+  const currentDate = new Date().toISOString().slice(0, 10);
+  
+  console.log('Author info:', { authorName, authorInitials });
+  
+  // Build hashtags HTML
+  let hashtagsHtml = '';
+  if (post.hashtags && post.hashtags.length > 0) {
+    hashtagsHtml = '<div style="margin-bottom:1rem;">';
+    post.hashtags.forEach(function(tag) {
+      hashtagsHtml += '<a href="/collab/hashtag/' + encodeURIComponent(tag) + '" class="hashtag-chip" style="text-decoration:none;">#' + tag + '</a> ';
+    });
+    hashtagsHtml += '</div>';
+  }
+
+  div.innerHTML = '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">' +
+    '<div class="avatar-init">' + authorInitials + '</div>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="font-weight:600;color:var(--text);">' + authorName + '</div>' +
+    '</div>' +
+    '<div class="text-muted" style="font-size:0.72rem;">' + currentDate + '</div>' +
+  '</div>' +
+  '<div style="margin-bottom:1rem;line-height:1.5;">' + post.content + '</div>' +
+  hashtagsHtml +
+  '<div style="display:flex;align-items:center;gap:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">' +
+    '<div style="display:flex;gap:0.5rem;">' +
+      '<button class="reaction-btn" onclick="toggleReaction(\'' + post.post_id + '\', \'insightful\')" data-reaction="insightful" data-count="' + (post.reaction_counts.insightful || 0) + '">' +
+        '<span>💡</span>' +
+        '<span>' + (post.reaction_counts.insightful || 0) + '</span>' +
+      '</button>' +
+      '<button class="reaction-btn" onclick="toggleReaction(\'' + post.post_id + '\', \'motivating\')" data-reaction="motivating" data-count="' + (post.reaction_counts.motivating || 0) + '">' +
+        '<span>🔥</span>' +
+        '<span>' + (post.reaction_counts.motivating || 0) + '</span>' +
+      '</button>' +
+      '<button class="reaction-btn" onclick="toggleReaction(\'' + post.post_id + '\', \'support\')" data-reaction="support" data-count="' + (post.reaction_counts.support || 0) + '">' +
+        '<span>🙌</span>' +
+        '<span>' + (post.reaction_counts.support || 0) + '</span>' +
+      '</button>' +
+    '</div>' +
+    '<button class="btn btn-ghost btn-sm" onclick="openComments(\'' + post.post_id + '\')">' +
+      '💬 ' + (post.comment_count || 0) + ' Comment' + ((post.comment_count || 0) != 1 ? 's' : '') +
+    '</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="sharePost(\'' + post.post_id + '\')">' +
+      '📤 Share' +
+    '</button>' +
+  '</div>';
+  
+  return div;
+}
+
+// Reaction functions
+async function toggleReaction(postId, reactionType) {
+  const button = document.querySelector('[data-post-id="' + postId + '"] [data-reaction="' + reactionType + '"]');
+  if (!button) return;
+  
+  try {
+    const response = await fetch('/api/collab/posts/' + postId + '/react', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        reaction_type: reactionType
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      updateReactionCounts(postId, data.reaction_counts);
+      // Update active state
+      const postElement = document.querySelector('[data-post-id="' + postId + '"]');
+      const allButtons = postElement.querySelectorAll('.reaction-btn');
+      allButtons.forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+    }
+  } catch (error) {
+    console.error('Error toggling reaction:', error);
+  }
+}
+
+function updateReactionCounts(postId, counts) {
+  const postElement = document.querySelector('[data-post-id="' + postId + '"]');
+  if (!postElement) return;
+  
+  Object.keys(counts).forEach(function(type) {
+    const count = counts[type];
+    const button = postElement.querySelector('[data-reaction="' + type + '"]');
+    if (button) {
+      const spans = button.querySelectorAll('span');
+      if (spans.length > 1) {
+        spans[spans.length - 1].textContent = count;
+      }
+    }
+  });
+}
+
+// Load more posts
+async function loadMorePosts() {
+  if (isLoading || !nextCursor) return;
+  
+  isLoading = true;
+  const loadBtn = document.getElementById('load-more-btn');
+  if (loadBtn) loadBtn.textContent = 'Loading...';
+  
+  try {
+    const response = await fetch('/api/collab/feed?cursor=' + encodeURIComponent(nextCursor));
+    const data = await response.json();
+    
+    if (data.posts) {
+      const feedContainer = document.getElementById('feed-container');
+      data.posts.forEach(function(post) {
+        const postElement = createPostElement(post);
+        feedContainer.appendChild(postElement);
+      });
+      
+      nextCursor = data.next_cursor;
+      
+      if (!data.has_more && loadBtn) {
+        loadBtn.style.display = 'none';
+      }
+    }
+  } catch (error) {
+    console.error('Error loading more posts:', error);
+  } finally {
+    isLoading = false;
+    if (loadBtn) loadBtn.textContent = 'Load More Posts';
+  }
+}
+
+// Placeholder functions
+function addImage() {
+  alert('Image upload coming soon!');
+}
+
+function addLink() {
+  alert('Link preview coming soon!');
+}
+
+function openComments(postId) {
+  window.location.href = `/collab/post/${postId}`;
+}
+
+function sharePost(postId) {
+  alert('Share functionality coming soon!');
+}
+
+// Debug function
+function debugPostCreation() {
+  console.log('=== DEBUG POST CREATION ===');
+  
+  // Check if modal exists
+  const modal = document.getElementById('createPostModal');
+  console.log('Modal element:', modal);
+  
+  // Check if content textarea exists
+  const content = document.getElementById('postContent');
+  console.log('Content textarea:', content);
+  
+  // Check if post button exists
+  const postBtn = document.getElementById('postBtn');
+  console.log('Post button:', postBtn);
+  
+  // Check if visibility select exists
+  const visibility = document.getElementById('postVisibility');
+  console.log('Visibility select:', visibility);
+  
+  // Check character counter
+  const charCount = document.getElementById('postCharCount');
+  console.log('Character counter:', charCount);
+  
+  // Check current user ID
+  console.log('Current User ID:', CURRENT_USER_ID);
+  
+  // Test modal opening
+  console.log('Testing modal opening...');
+  if (modal) {
+    modal.style.display = 'flex';
+    console.log('Modal opened, display:', modal.style.display);
+    
+    // Focus on content
+    if (content) {
+      content.focus();
+      console.log('Content focused');
+    }
+  } else {
+    console.error('Modal element not found!');
+  }
+  
+  // Test button enabling
+  if (postBtn && content) {
+    content.value = 'Test post content #debug';
+    postBtn.disabled = false;
+    console.log('Test content added, button enabled');
+  }
+  
+  console.log('=== DEBUG COMPLETE ===');
+}
+
+// Test modal visibility
+function testModalVisibility() {
+  console.log('=== TESTING MODAL VISIBILITY ===');
+  
+  const modal = document.getElementById('createPostModal');
+  if (!modal) {
+    console.error('Modal not found!');
+    return;
+  }
+  
+  // Force visible state
+  modal.style.display = 'flex';
+  modal.style.position = 'fixed';
+  modal.style.top = '0';
+  modal.style.left = '0';
+  modal.style.right = '0';
+  modal.style.bottom = '0';
+  modal.style.background = 'rgba(255, 0, 0, 0.9)';
+  modal.style.zIndex = '9999';
+  modal.style.visibility = 'visible';
+  modal.style.opacity = '1';
+  
+  console.log('Forced modal visibility styles applied');
+  
+  // Add visual indicator
+  modal.style.border = '3px solid red';
+  modal.style.boxShadow = '0 0 50px rgba(255, 0, 0, 0.8)';
+  
+  setTimeout(() => {
+    const rect = modal.getBoundingClientRect();
+    console.log('Modal rect after forcing visibility:', rect);
+    console.log('Modal is now visible:', rect.width > 0 && rect.height > 0);
+    
+    // If still not visible, there might be a parent element hiding it
+    if (rect.width === 0 || rect.height === 0) {
+      console.error('Modal still not visible! Checking parent elements...');
+      
+      // Check if any parent is hiding it
+      let parent = modal.parentElement;
+      while (parent && parent !== document.body) {
+        console.log('Parent element:', parent, 'Display:', parent.style.display);
+        parent = parent.parentElement;
+      }
+    }
+  }, 200);
+}
+</script>
+
+{% endblock %}

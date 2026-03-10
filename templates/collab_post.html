@@ -1,0 +1,290 @@
+{% extends "collab_base.html" %}
+{% block title %}Post - ScleraCollab{% endblock %}
+
+{% block head %}
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="page">
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    
+    <!-- Back Navigation -->
+    <div style="margin-bottom:2rem;">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-ghost btn-sm">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right:0.5rem;">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+        </svg>
+        Back to Feed
+      </a>
+    </div>
+
+    <!-- Post -->
+    <div class="island island-pad" data-post-id="{{ post.id }}">
+      <!-- Post Author -->
+      <div class="profile-summary">
+        <div class="avatar-init" style="width:48px;height:48px;font-size:1.2rem;margin-bottom:0.5rem;">
+          {% if post.author and post.author.profile_picture %}
+            <img src="{{ url_for('serve_media', filename=post.author.profile_picture) }}" alt="{{ post.author.name }}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+          {% else %}
+            {{ (post.author.name if post.author else 'Unknown')[:2].upper() if post.author else 'U' }}
+          {% endif %}
+        </div>
+        <div style="flex:1;min-width:0;">
+          <h3 style="margin:0 0 0.5rem 0;">{{ post.author.name if post.author else 'Unknown' }}</h3>
+          {% if post.author and post.author.headline %}
+            <p style="color:var(--text-muted);margin-bottom:0.5rem;">{{ post.author.headline }}</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Post Content -->
+      <div style="font-size:1.05rem;line-height:1.6;margin-bottom:1.5rem;">{{ post.content|safe }}</div>
+
+      <!-- Post Images -->
+      {% if post.images %}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:1rem;margin-bottom:1.5rem;">
+          {% for image in post.images %}
+            <img src="{{ url_for('serve_media', filename=image) }}" style="width:100%;height:200px;object-fit:cover;border-radius:0.5rem;">
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <!-- Post Hashtags -->
+      {% if post.hashtags %}
+        <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1.5rem;">
+          {% for hashtag in post.hashtags %}
+            <a href="/collab/hashtag/{{ hashtag }}" class="chip chip-n" style="font-size:0.8rem;text-decoration:none;">#{{ hashtag }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <!-- Post Actions -->
+      <div style="display:flex;align-items:center;gap:1.5rem;padding-top:1.5rem;border-top:1px solid var(--border);">
+        <!-- Reactions -->
+        <div style="display:flex;align-items:center;gap:1rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+          <div style="display:flex;gap:0.5rem;">
+            <button class="reaction-btn {% if post.user_reaction == 'insightful' %}active{% endif %}" onclick="toggleReaction('{{ post.id }}', 'insightful')" data-reaction="insightful" data-count="{{ post.reaction_counts.insightful or 0 }}">
+              <span>💡</span>
+              <span>{{ post.reaction_counts.insightful or 0 }}</span>
+            </button>
+            <button class="reaction-btn {% if post.user_reaction == 'motivating' %}active{% endif %}" onclick="toggleReaction('{{ post.id }}', 'motivating')" data-reaction="motivating" data-count="{{ post.reaction_counts.motivating or 0 }}">
+              <span>🔥</span>
+              <span>{{ post.reaction_counts.motivating or 0 }}</span>
+            </button>
+            <button class="reaction-btn {% if post.user_reaction == 'support' %}active{% endif %}" onclick="toggleReaction('{{ post.id }}', 'support')" data-reaction="support" data-count="{{ post.reaction_counts.support or 0 }}">
+              <span>🙌</span>
+              <span>{{ post.reaction_counts.support or 0 }}</span>
+            </button>
+          </div>
+
+        <!-- Other Actions -->
+        <button onclick="sharePost('{{ post.id }}')" style="color:var(--text-muted);font-size:0.85rem;">
+          <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right:0.25rem;">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.367 2.684 3 3 0 00-5.367-2.684z"/>
+          </svg>
+          Share
+        </button>
+      </div>
+    </div>
+
+    <!-- Comments Section -->
+    <div class="island island-pad" style="margin-top:1.5rem;">
+      <h3 style="margin-bottom:1.5rem;">Comments ({{ post.comments|length }})</h3>
+
+      <!-- Add Comment -->
+      <div style="margin-bottom:2rem;">
+        <div style="display:flex;gap:0.75rem;">
+          {% if profile and profile.profile_picture %}
+            <img src="{{ url_for('serve_media', filename=profile.profile_picture) }}" class="avatar">
+          {% else %}
+            <div class="avatar-init">{{ (profile.name if profile else 'User')[:2].upper() if profile else 'U' }}</div>
+          {% endif %}
+          <div style="flex:1;">
+            <textarea id="new-comment" class="input" rows="3" placeholder="Add a comment..." style="resize:vertical;"></textarea>
+            <div style="margin-top:0.5rem;display:flex;justify-content:flex-end;">
+              <button onclick="addComment()" class="btn btn-primary btn-sm" id="comment-btn" disabled>Comment</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comments List -->
+      <div id="comments-container">
+        {% for comment in post.comments %}
+          <div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;" data-comment-id="{{ comment.id }}">
+            {% if comment.author.profile_picture %}
+              <img src="{{ url_for('serve_media', filename=comment.author.profile_picture) }}" class="avatar">
+            {% else %}
+              <div class="avatar-init">{{ comment.author.name[:2].upper() }}</div>
+            {% endif %}
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">
+                <a href="{{ url_for('profile_view', uid=comment.author.uid) }}" style="font-weight:600;color:var(--text);text-decoration:none;">{{ comment.author.name }}</a>
+                <span class="text-muted" style="font-size:0.72rem;">{{ comment.created_at[:10] }} {{ comment.created_at[11:16] }}</span>
+              </div>
+              <div style="line-height:1.5;margin-bottom:0.5rem;">{{ comment.content }}</div>
+              <div style="display:flex;gap:0.5rem;">
+                <button class="btn btn-ghost btn-sm" style="font-size:0.7rem;">💡 {{ comment.reaction_counts.insightful or 0 }}</button>
+                <button class="btn btn-ghost btn-sm" style="font-size:0.7rem;">🔥 {{ comment.reaction_counts.motivating or 0 }}</button>
+                <button class="btn btn-ghost btn-sm" style="font-size:0.7rem;">🤝 {{ comment.reaction_counts.support or 0 }}</button>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Initialize SocketIO
+const socket = io();
+
+// Join post room for real-time updates
+socket.emit('join_post', { post_id: '{{ post.id }}' });
+
+// Socket event handlers
+socket.on('new_comment', (data) => {
+  if (data.post_id === '{{ post.id }}') {
+    addCommentToUI(data.comment);
+  }
+});
+
+socket.on('comment_deleted', (data) => {
+  if (data.post_id === '{{ post.id }}') {
+    removeCommentFromUI(data.comment_id);
+  }
+});
+
+// Character counter for comment
+document.getElementById('new-comment').addEventListener('input', (e) => {
+  const length = e.target.value.length;
+  document.getElementById('comment-btn').disabled = length === 0;
+});
+
+// Add comment
+async function addComment() {
+  const content = document.getElementById('new-comment').value.trim();
+  if (!content) return;
+  
+  const commentBtn = document.getElementById('comment-btn');
+  commentBtn.disabled = true;
+  commentBtn.textContent = 'Posting...';
+  
+  try {
+    const response = await fetch('/api/collab/posts/{{ post.id }}/comments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        content: content
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      document.getElementById('new-comment').value = '';
+      addCommentToUI(data.comment);
+    } else {
+      alert(data.error || 'Failed to add comment');
+    }
+  } catch (error) {
+    console.error('Error adding comment:', error);
+    alert('Failed to add comment');
+  } finally {
+    commentBtn.disabled = false;
+    commentBtn.textContent = 'Comment';
+  }
+}
+
+// Add comment to UI
+function addCommentToUI(comment) {
+  const container = document.getElementById('comments-container');
+  const commentElement = document.createElement('div');
+  commentElement.style.cssText = 'display:flex;gap:0.75rem;margin-bottom:1.5rem;';
+  commentElement.dataset.commentId = comment.id;
+  
+  commentElement.innerHTML = 
+    '<div class="avatar-init">' + comment.author.name.substring(0, 2).toUpperCase() + '</div>' +
+    '<div style="flex:1;min-width:0;">' +
+      '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.25rem;">' +
+        '<a href="/profile/' + comment.author.uid + '" style="font-weight:600;color:var(--text);text-decoration:none;">' + comment.author.name + '</a>' +
+        '<span class="text-muted" style="font-size:0.72rem;">Just now</span>' +
+      '</div>' +
+      '<div style="line-height:1.5;margin-bottom:0.5rem;">' + comment.content + '</div>' +
+      '<div style="display:flex;gap:0.5rem;">' +
+        '<button class="btn btn-ghost btn-sm" style="font-size:0.7rem;">💡 0</button>' +
+        '<button class="btn btn-ghost btn-sm" style="font-size:0.7rem;">🔥 0</button>' +
+        '<button class="btn btn-ghost btn-sm" style="font-size:0.7rem;">🤝 0</button>' +
+      '</div>' +
+    '</div>';
+  
+  container.appendChild(commentElement);
+}
+
+// Remove comment from UI
+function removeCommentFromUI(commentId) {
+  const commentElement = document.querySelector('[data-comment-id="' + commentId + '"]');
+  if (commentElement) {
+    commentElement.remove();
+  }
+}
+
+// Reaction functions (same as dashboard)
+async function toggleReaction(postId, reactionType) {
+  const button = document.querySelector('[data-post-id="' + postId + '"] [data-reaction="' + reactionType + '"]');
+  if (!button) return;
+  
+  try {
+    const response = await fetch('/api/collab/posts/' + postId + '/react', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        reaction_type: reactionType
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      updateReactionCounts(postId, data.reaction_counts);
+      const postElement = document.querySelector('[data-post-id="' + postId + '"]');
+      const allButtons = postElement.querySelectorAll('.reaction-btn');
+      allButtons.forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+    }
+  } catch (error) {
+    console.error('Error toggling reaction:', error);
+  }
+}
+
+function updateReactionCounts(postId, counts) {
+  const postElement = document.querySelector('[data-post-id="' + postId + '"]');
+  if (!postElement) return;
+  
+  Object.keys(counts).forEach(function(type) {
+    const count = counts[type];
+    const button = postElement.querySelector('[data-reaction="' + type + '"]');
+    if (button) {
+      const spans = button.querySelectorAll('span');
+      if (spans.length > 1) {
+        spans[spans.length - 1].textContent = count;
+      }
+    }
+  });
+}
+
+function sharePost(postId) {
+  alert('Share functionality coming soon!');
+}
+</script>
+
+{% endblock %}

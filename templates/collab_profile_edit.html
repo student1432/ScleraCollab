@@ -1,0 +1,325 @@
+{% extends "collab_base.html" %}
+{% block title %}Edit Profile — ScleraCollab{% endblock %}
+
+{% block head %}
+<style>
+  .edit-sec { margin-bottom:1rem;scroll-margin-top:80px; }
+  .f-row { display:grid;grid-template-columns:1fr 1fr;gap:0.75rem; }
+  .fg { display:flex;flex-direction:column;gap:0.4rem;margin-bottom:0.75rem; }
+  .fl { font-size:0.78rem;font-weight:600;color:var(--muted);letter-spacing:0.02em; }
+  .entry-card { border:1px solid var(--border);border-radius:0.9rem;padding:0.9rem;margin-bottom:0.6rem;display:flex;align-items:flex-start;gap:0.75rem;background:var(--island-h);transition:border-color 0.15s; }
+  .entry-card:hover { border-color:var(--accent); }
+  .entry-body { flex:1;min-width:0; }
+  .pr-row { display:flex;align-items:center;justify-content:space-between;padding:0.6rem 0;border-bottom:1px solid var(--divider); }
+  .pr-row:last-child { border-bottom:none; }
+  select.sel { background:var(--input-bg);border:1px solid var(--input-b);border-radius:0.6rem;padding:0.4rem 0.7rem;color:var(--text);font-size:0.8rem;font-family:'Sora',sans-serif;cursor:pointer;outline:none; }
+  select.sel:focus { border-color:var(--accent); }
+  .char-ct { text-align:right;font-size:0.7rem;color:var(--faint);margin-top:0.2rem; }
+  .sticky-top { position:sticky;top:60px;z-index:50;background:var(--bg-nav);border-bottom:1px solid var(--border);backdrop-filter:blur(12px);padding:0.75rem 1.5rem;display:flex;align-items:center;justify-content:space-between; }
+  @media(max-width:640px) { .f-row{grid-template-columns:1fr} }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sticky-top">
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <a href="{{ url_for('profile_view', uid=profile.get('uid','')) }}" class="btn btn-ghost btn-sm">← Back</a>
+    <span style="font-size:0.9rem;font-weight:600;">Edit Profile</span>
+  </div>
+  {% if completion %}
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <div style="width:100px;height:5px;background:var(--island-h);border-radius:9999px;overflow:hidden;"><div style="width:{{ completion.score }}%;height:100%;background:{{ completion.milestone_color }};border-radius:9999px;"></div></div>
+    <span style="font-size:0.76rem;color:{{ completion.milestone_color }};font-weight:600;">{{ completion.score }}% · {{ completion.milestone }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="page" style="max-width:720px;padding-top:1.5rem;">
+
+  <!-- Photo -->
+  <div class="island island-pad edit-sec" id="photo">
+    <div class="island-label">Profile Photo & Banner</div>
+    <div style="display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap;">
+      <div style="text-align:center;">
+        {% if profile.profile_picture %}
+          <img src="{{ url_for('serve_media', filename=profile.profile_picture) }}" style="width:88px;height:88px;border-radius:50%;object-fit:cover;border:3px solid var(--border);margin-bottom:0.5rem;">
+        {% else %}
+          <div class="avatar-init" style="width:88px;height:88px;font-size:1.8rem;border-width:3px;margin-bottom:0.5rem;">{{ initials }}</div>
+        {% endif %}
+        <form action="{{ url_for('upload_photo') }}" method="post" enctype="multipart/form-data">
+          <input type="hidden" name="type" value="avatar">
+          <label style="cursor:pointer;"><span class="btn btn-secondary btn-sm">↑ Upload Photo</span><input type="file" name="photo" accept="image/*" style="display:none;" onchange="this.form.submit()"></label>
+        </form>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <div style="height:72px;border-radius:0.75rem;overflow:hidden;margin-bottom:0.5rem;border:1px solid var(--border);">
+          {% if profile.profile_banner %}
+            <img src="{{ url_for('serve_media', filename=profile.profile_banner) }}" style="width:100%;height:100%;object-fit:cover;">
+          {% else %}
+            <div style="width:100%;height:100%;background:linear-gradient(135deg,#22c55e18,#3b82f620,#a78bfa18);display:flex;align-items:center;justify-content:center;"><span class="text-muted" style="font-size:0.76rem;">No banner</span></div>
+          {% endif %}
+        </div>
+        <form action="{{ url_for('upload_photo') }}" method="post" enctype="multipart/form-data">
+          <input type="hidden" name="type" value="banner">
+          <label style="cursor:pointer;"><span class="btn btn-secondary btn-sm">↑ Upload Banner</span><input type="file" name="photo" accept="image/*" style="display:none;" onchange="this.form.submit()"></label>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Basic info -->
+  <div class="island island-pad edit-sec" id="basic">
+    <div class="island-label">Basic Info</div>
+    <form method="post" action="{{ url_for('profile_edit') }}">
+      <input type="hidden" name="section" value="basic">
+      <div class="fg"><label class="fl">Headline</label><input class="input" type="text" name="headline" value="{{ profile.get('headline','') }}" placeholder="e.g. Aspiring Engineer · Open to Internships" maxlength="120" oninput="document.getElementById('hc').textContent=this.value.length"><div class="char-ct"><span id="hc">{{ profile.get('headline','')|length }}</span>/120</div></div>
+      <div class="fg"><label class="fl">Bio</label><textarea class="input" name="bio" rows="4" placeholder="Tell your story…" maxlength="2000" oninput="document.getElementById('bc').textContent=this.value.length">{{ profile.get('bio','') }}</textarea><div class="char-ct"><span id="bc">{{ profile.get('bio','')|length }}</span>/2000</div></div>
+      <div class="f-row">
+        <div class="fg"><label class="fl">Location</label><input class="input" type="text" name="location" value="{{ profile.get('location','') }}" placeholder="City, Country"></div>
+        <div class="fg"><label class="fl">Website</label><input class="input" type="url" name="website" value="{{ profile.get('website','') }}" placeholder="https://…"></div>
+        <div class="fg"><label class="fl">GitHub Username</label><input class="input" type="text" name="github" value="{{ profile.get('github','') }}" placeholder="yourusername"></div>
+        <div class="fg"><label class="fl">LinkedIn URL</label><input class="input" type="url" name="linkedin" value="{{ profile.get('linkedin','') }}" placeholder="https://linkedin.com/in/…"></div>
+      </div>
+      <button type="submit" class="btn btn-primary">Save Basic Info</button>
+    </form>
+  </div>
+
+  <!-- Skills -->
+  <div class="island island-pad edit-sec" id="skills">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Skills</div></div>
+    <form method="post" action="{{ url_for('profile_edit') }}" style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+      <input type="hidden" name="section" value="skills"><input type="hidden" name="action" value="add">
+      <input class="input" type="text" name="skill_name" placeholder="e.g. Python, Public Speaking" style="flex:1;">
+      <button type="submit" class="btn btn-primary btn-sm">Add</button>
+    </form>
+    {% if profile.skills %}
+    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+      {% for skill in profile.skills %}
+      <div style="display:flex;align-items:center;gap:0.3rem;background:var(--island-h);border:1px solid var(--border);border-radius:9999px;padding:0.3rem 0.5rem 0.3rem 0.8rem;">
+        <span style="font-size:0.8rem;font-weight:500;">{{ skill.name }}</span>
+        {% if skill.endorsement_count %}<span style="font-size:0.68rem;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:0.1rem 0.4rem;border-radius:9999px;">{{ skill.endorsement_count }}</span>{% endif %}
+        <form method="post" action="{{ url_for('profile_edit') }}" style="margin:0;">
+          <input type="hidden" name="section" value="skills"><input type="hidden" name="action" value="delete"><input type="hidden" name="skill_name" value="{{ skill.name }}">
+          <button type="submit" class="btn btn-ghost" style="padding:0.15rem 0.3rem;font-size:0.7rem;color:var(--muted);">✕</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="text-muted" style="font-size:0.82rem;">No skills added yet.</div>{% endif %}
+  </div>
+
+  <!-- Education -->
+  <div class="island island-pad edit-sec" id="education">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Education</div><button class="btn btn-secondary btn-sm" onclick="tf('eduF')">+ Add</button></div>
+    <div id="eduF" style="display:none;margin-bottom:1rem;">
+      <form method="post" action="{{ url_for('profile_edit') }}" style="background:var(--island-h);border-radius:1rem;padding:1rem;border:1px solid var(--border);">
+        <input type="hidden" name="section" value="education"><input type="hidden" name="action" value="add"><input type="hidden" name="entry_id" value="">
+        <div class="f-row">
+          <div class="fg"><label class="fl">Institution *</label><input class="input" type="text" name="institution" required placeholder="School or College"></div>
+          <div class="fg"><label class="fl">Degree / Grade</label><input class="input" type="text" name="degree" placeholder="Grade 12, B.Tech…"></div>
+          <div class="fg"><label class="fl">Field</label><input class="input" type="text" name="field" placeholder="PCM, CS…"></div>
+          <div class="fg"><label class="fl">Board</label><input class="input" type="text" name="board" placeholder="CBSE, IIT…"></div>
+          <div class="fg"><label class="fl">From</label><input class="input" type="text" name="from_year" placeholder="2022"></div>
+          <div class="fg"><label class="fl">To</label><input class="input" type="text" name="to_year" placeholder="2024"><label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;margin-top:0.3rem;cursor:pointer;"><input type="checkbox" name="current"> Currently attending</label></div>
+        </div>
+        <div class="fg"><label class="fl">Description</label><textarea class="input" name="description" rows="2" placeholder="Activities, achievements…"></textarea></div>
+        <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Save</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('eduF')">Cancel</button></div>
+      </form>
+    </div>
+    {% if profile.education %}{% for edu in profile.education %}
+    <div class="entry-card">
+      <div style="font-size:1.2rem;">🎓</div>
+      <div class="entry-body"><div style="font-weight:600;font-size:0.88rem;">{{ edu.institution }}</div><div class="text-muted" style="font-size:0.78rem;">{{ edu.degree }}{% if edu.field %} · {{ edu.field }}{% endif %}</div>{% if edu.from_year %}<div class="text-muted" style="font-size:0.76rem;">{{ edu.from_year }} – {{ 'Present' if edu.current else (edu.to_year or '') }}</div>{% endif %}</div>
+      <form method="post" action="{{ url_for('profile_edit') }}"><input type="hidden" name="section" value="education"><input type="hidden" name="action" value="delete"><input type="hidden" name="entry_id" value="{{ edu.id }}"><button type="submit" class="btn btn-ghost btn-sm" style="color:var(--accent-red);">Remove</button></form>
+    </div>
+    {% endfor %}{% else %}<div class="text-muted" style="font-size:0.82rem;">No education entries yet.</div>{% endif %}
+  </div>
+
+  <!-- Experience -->
+  <div class="island island-pad edit-sec" id="experience">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Experience</div><button class="btn btn-secondary btn-sm" onclick="tf('expF')">+ Add</button></div>
+    <div id="expF" style="display:none;margin-bottom:1rem;">
+      <form method="post" action="{{ url_for('profile_edit') }}" style="background:var(--island-h);border-radius:1rem;padding:1rem;border:1px solid var(--border);">
+        <input type="hidden" name="section" value="experience"><input type="hidden" name="action" value="add"><input type="hidden" name="entry_id" value="">
+        <div class="f-row">
+          <div class="fg"><label class="fl">Title *</label><input class="input" type="text" name="title" required placeholder="e.g. Frontend Intern"></div>
+          <div class="fg"><label class="fl">Company *</label><input class="input" type="text" name="company" required placeholder="Company / Org"></div>
+          <div class="fg"><label class="fl">Type</label><select class="input sel" name="type">{% for t in experience_types %}<option>{{ t }}</option>{% endfor %}</select></div>
+          <div class="fg"><label class="fl">Location</label><input class="input" type="text" name="location" placeholder="Remote / City"></div>
+          <div class="fg"><label class="fl">From</label><input class="input" type="text" name="from_year" placeholder="May 2024"></div>
+          <div class="fg"><label class="fl">To</label><input class="input" type="text" name="to_year" placeholder="Aug 2024"><label style="display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;margin-top:0.3rem;cursor:pointer;"><input type="checkbox" name="current"> Currently here</label></div>
+        </div>
+        <div class="fg"><label class="fl">Description</label><textarea class="input" name="description" rows="3" placeholder="What did you work on?"></textarea></div>
+        <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Save</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('expF')">Cancel</button></div>
+      </form>
+    </div>
+    {% if profile.experience %}{% for exp in profile.experience %}
+    <div class="entry-card">
+      <div style="font-size:1.2rem;">💼</div>
+      <div class="entry-body"><div style="font-weight:600;font-size:0.88rem;">{{ exp.title }} · {{ exp.company }}</div><div class="text-muted" style="font-size:0.78rem;">{{ exp.type }}{% if exp.location %} · {{ exp.location }}{% endif %}</div>{% if exp.from_year %}<div class="text-muted" style="font-size:0.76rem;">{{ exp.from_year }} – {{ 'Present' if exp.current else (exp.to_year or '') }}</div>{% endif %}</div>
+      <form method="post" action="{{ url_for('profile_edit') }}"><input type="hidden" name="section" value="experience"><input type="hidden" name="action" value="delete"><input type="hidden" name="entry_id" value="{{ exp.id }}"><button type="submit" class="btn btn-ghost btn-sm" style="color:var(--accent-red);">Remove</button></form>
+    </div>
+    {% endfor %}{% else %}<div class="text-muted" style="font-size:0.82rem;">No experience added yet.</div>{% endif %}
+  </div>
+
+  <!-- Projects -->
+  <div class="island island-pad edit-sec" id="projects">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Projects</div><button class="btn btn-secondary btn-sm" onclick="tf('projF')">+ Add</button></div>
+    <div id="projF" style="display:none;margin-bottom:1rem;">
+      <form method="post" action="{{ url_for('profile_edit') }}" style="background:var(--island-h);border-radius:1rem;padding:1rem;border:1px solid var(--border);">
+        <input type="hidden" name="section" value="projects"><input type="hidden" name="action" value="add"><input type="hidden" name="entry_id" value="">
+        <div class="fg"><label class="fl">Title *</label><input class="input" type="text" name="title" required placeholder="e.g. AI Study Planner"></div>
+        <div class="fg"><label class="fl">Description</label><textarea class="input" name="description" rows="3" placeholder="What does it do?"></textarea></div>
+        <div class="f-row">
+          <div class="fg"><label class="fl">Live Link</label><input class="input" type="url" name="link" placeholder="https://…"></div>
+          <div class="fg"><label class="fl">GitHub Repo</label><input class="input" type="text" name="github" placeholder="username/repo"></div>
+          <div class="fg"><label class="fl">From</label><input class="input" type="text" name="from_year" placeholder="2024"></div>
+          <div class="fg"><label class="fl">To</label><input class="input" type="text" name="to_year" placeholder="Present"></div>
+        </div>
+        <div class="fg"><label class="fl">Tech Stack</label><input class="input" type="text" name="tech_stack" placeholder="Python, React, Firebase (comma-separated)"></div>
+        <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Save</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('projF')">Cancel</button></div>
+      </form>
+    </div>
+    {% if profile.projects %}{% for proj in profile.projects %}
+    <div class="entry-card">
+      <div style="font-size:1.2rem;">🚀</div>
+      <div class="entry-body"><div style="font-weight:600;font-size:0.88rem;">{{ proj.title }}</div>{% if proj.tech_stack %}<div class="text-muted" style="font-size:0.76rem;">{{ proj.tech_stack | join(', ') }}</div>{% endif %}{% if proj.link %}<a href="{{ proj.link }}" target="_blank" class="text-accent" style="font-size:0.76rem;">↗ Live demo</a>{% endif %}</div>
+      <form method="post" action="{{ url_for('profile_edit') }}"><input type="hidden" name="section" value="projects"><input type="hidden" name="action" value="delete"><input type="hidden" name="entry_id" value="{{ proj.id }}"><button type="submit" class="btn btn-ghost btn-sm" style="color:var(--accent-red);">Remove</button></form>
+    </div>
+    {% endfor %}{% else %}<div class="text-muted" style="font-size:0.82rem;">No projects yet. Add what you've built.</div>{% endif %}
+  </div>
+
+  <!-- Awards -->
+  <div class="island island-pad edit-sec" id="awards">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Awards</div><button class="btn btn-secondary btn-sm" onclick="tf('awdF')">+ Add</button></div>
+    <div id="awdF" style="display:none;margin-bottom:1rem;">
+      <form method="post" action="{{ url_for('profile_edit') }}" style="background:var(--island-h);border-radius:1rem;padding:1rem;border:1px solid var(--border);">
+        <input type="hidden" name="section" value="awards"><input type="hidden" name="action" value="add"><input type="hidden" name="entry_id" value="">
+        <div class="f-row">
+          <div class="fg"><label class="fl">Title *</label><input class="input" type="text" name="title" required placeholder="e.g. Science Olympiad Gold"></div>
+          <div class="fg"><label class="fl">Issued By</label><input class="input" type="text" name="issuer" placeholder="CBSE, MIT…"></div>
+          <div class="fg"><label class="fl">Date</label><input class="input" type="text" name="date" placeholder="2024"></div>
+        </div>
+        <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Save</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('awdF')">Cancel</button></div>
+      </form>
+    </div>
+    {% if profile.awards %}{% for award in profile.awards %}{% if award is mapping %}
+    <div class="entry-card">
+      <div style="font-size:1.2rem;">🏆</div>
+      <div class="entry-body"><div style="font-weight:600;font-size:0.88rem;">{{ award.title }}</div>{% if award.issuer %}<div class="text-muted" style="font-size:0.78rem;">{{ award.issuer }}</div>{% endif %}{% if award.date %}<div class="text-muted" style="font-size:0.74rem;">{{ award.date }}</div>{% endif %}</div>
+      <form method="post" action="{{ url_for('profile_edit') }}"><input type="hidden" name="section" value="awards"><input type="hidden" name="action" value="delete"><input type="hidden" name="entry_id" value="{{ award.id }}"><button type="submit" class="btn btn-ghost btn-sm" style="color:var(--accent-red);">Remove</button></form>
+    </div>
+    {% endif %}{% endfor %}{% endif %}
+  </div>
+
+  <!-- Languages -->
+  <div class="island island-pad edit-sec" id="languages">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Languages</div><button class="btn btn-secondary btn-sm" onclick="tf('langF')">+ Add</button></div>
+    <div id="langF" style="display:none;margin-bottom:1rem;">
+      <form method="post" action="{{ url_for('profile_edit') }}" style="background:var(--island-h);border-radius:1rem;padding:1rem;border:1px solid var(--border);">
+        <input type="hidden" name="section" value="languages"><input type="hidden" name="action" value="add"><input type="hidden" name="entry_id" value="">
+        <div class="f-row">
+          <div class="fg"><label class="fl">Language *</label><input class="input" type="text" name="language" required placeholder="Hindi, Spanish…"></div>
+          <div class="fg"><label class="fl">Proficiency</label><select class="input sel" name="proficiency">{% for p in proficiency_levels %}<option>{{ p }}</option>{% endfor %}</select></div>
+        </div>
+        <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Add</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('langF')">Cancel</button></div>
+      </form>
+    </div>
+    {% if profile.languages %}<div style="display:flex;flex-wrap:wrap;gap:0.5rem;">{% for lang in profile.languages %}<div style="display:flex;align-items:center;gap:0.5rem;background:var(--island-h);border:1px solid var(--border);border-radius:9999px;padding:0.3rem 0.5rem 0.3rem 0.8rem;"><span style="font-size:0.82rem;font-weight:500;">{{ lang.language }}</span><span class="text-muted" style="font-size:0.72rem;">{{ lang.proficiency }}</span><form method="post" action="{{ url_for('profile_edit') }}" style="margin:0;"><input type="hidden" name="section" value="languages"><input type="hidden" name="action" value="delete"><input type="hidden" name="entry_id" value="{{ lang.id }}"><button type="submit" class="btn btn-ghost" style="padding:0.1rem 0.3rem;font-size:0.7rem;color:var(--muted);">✕</button></form></div>{% endfor %}</div>{% endif %}
+  </div>
+
+  <!-- Mentorship -->
+  <div class="island island-pad edit-sec" id="mentorship">
+    <div class="sec-head"><div class="island-label" style="margin-bottom:0;">Mentorship</div><button class="btn btn-secondary btn-sm" onclick="tf('mentorF')">+ Edit</button></div>
+    <div id="mentorF" style="display:none;margin-bottom:1rem;">
+      <form method="post" action="{{ url_for('profile_edit') }}" style="background:var(--island-h);border-radius:1rem;padding:1rem;border:1px solid var(--border);">
+        <input type="hidden" name="section" value="mentorship">
+        <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.84rem;cursor:pointer;">
+            <input type="checkbox" name="mentorship_available" {% if profile.get('mentorship_available', False) %}checked{% endif %}>
+            <span>Available for mentorship</span>
+          </label>
+        </div>
+        
+        <div style="margin-bottom:1rem;">
+          <label class="fl">Focus Areas (max 3)</label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:0.5rem;">
+            {% set focus_options = ['Academic Subjects', 'Career Guidance', 'College Applications', 'Exam Preparation', 'Skill Development', 'Programming', 'Business & Entrepreneurship', 'Design & Creative', 'Science & Research', 'Language Learning', 'Personal Development', 'Technology'] %}
+            {% for option in focus_options %}
+            <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;cursor:pointer;padding:0.2rem;border-radius:0.4rem;">
+              <input type="checkbox" name="focus_areas" value="{{ option }}" {% if option in profile.get('mentorship_focus_areas', []) %}checked{% endif %}>
+              <span>{{ option }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        
+        <div class="f-row">
+          <div class="fg"><label class="fl">Time Commitment</label>
+            <select class="input sel" name="time_commitment">
+              <option value="casual" {{ 'selected' if profile.get('mentorship_preferences',{}).get('time_commitment') == 'casual' }}>Casual (as needed)</option>
+              <option value="monthly" {{ 'selected' if profile.get('mentorship_preferences',{}).get('time_commitment') == 'monthly' }}>Monthly check-ins</option>
+              <option value="weekly" {{ 'selected' if profile.get('mentorship_preferences',{}).get('time_commitment') == 'weekly' }}>Weekly meetings</option>
+              <option value="biweekly" {{ 'selected' if profile.get('mentorship_preferences',{}).get('time_commitment') == 'biweekly' }}>Bi-weekly meetings</option>
+            </select>
+          </div>
+          <div class="fg"><label class="fl">Max Mentees</label>
+            <input class="input" type="number" name="max_mentees" min="1" max="10" value="{{ profile.get('mentorship_preferences',{}).get('max_mentees', 3) }}" style="font-size:0.82rem;">
+          </div>
+        </div>
+        
+        <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Save</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('mentorF')">Cancel</button></div>
+      </form>
+    </div>
+    
+    {% if profile.get('mentorship_available') %}
+    <div style="margin-top:1rem;">
+      <div style="font-size:0.78rem;font-weight:600;color:var(--accent);margin-bottom:0.5rem;">🎓 Mentor Status: Active</div>
+      {% if profile.get('mentorship_focus_areas') %}
+      <div style="font-size:0.82rem;margin-bottom:0.5rem;">
+        <strong>Focus Areas:</strong> {{ profile.mentorship_focus_areas | join(', ') }}
+      </div>
+      {% endif %}
+      <div style="font-size:0.78rem;color:var(--muted);">
+        Total Mentees: {{ profile.get('mentorship_stats',{}).get('total_mentees', 0) }} | 
+        Active: {{ profile.get('mentorship_stats',{}).get('active_mentees', 0) }} | 
+        Completed: {{ profile.get('mentorship_stats',{}).get('completed_mentorships', 0) }}
+      </div>
+    </div>
+    {% else %}
+    <div style="margin-top:1rem;font-size:0.82rem;color:var(--muted);">
+      Enable mentorship to start helping others in your areas of expertise.
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Privacy -->
+  <div class="island island-pad edit-sec" id="privacy">
+    <div class="island-label">Privacy Settings</div>
+    <div class="text-muted" style="font-size:0.8rem;margin-bottom:1rem;">Control who can see each section.</div>
+    <form method="post" action="{{ url_for('profile_edit') }}">
+      <input type="hidden" name="section" value="privacy">
+      {% set sec_labels = {'bio':'Bio','education':'Education','experience':'Experience','projects':'Projects','skills':'Skills','volunteer':'Volunteer','awards':'Awards','languages':'Languages','contact_info':'Contact Info','recommendations':'Recommendations'} %}
+      {% for field, label in sec_labels.items() %}
+      <div class="pr-row">
+        <span style="font-size:0.84rem;">{{ label }}</span>
+        <select class="sel" name="privacy_{{ field }}">
+          <option value="public" {{ 'selected' if profile.get('privacy',{}).get(field, default_privacy.get(field)) == 'public' }}>🌐 Public</option>
+          <option value="connections" {{ 'selected' if profile.get('privacy',{}).get(field, default_privacy.get(field)) == 'connections' }}>🤝 Connections</option>
+          <option value="only_me" {{ 'selected' if profile.get('privacy',{}).get(field, default_privacy.get(field)) == 'only_me' }}>🔒 Only Me</option>
+        </select>
+      </div>
+      {% endfor %}
+      <div style="margin-top:1rem;"><button type="submit" class="btn btn-primary">Save Privacy Settings</button></div>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function tf(id) { const e=document.getElementById(id); e.style.display=e.style.display==='none'?'block':'none'; if(e.style.display==='block') e.scrollIntoView({behavior:'smooth',block:'start'}); }
+window.addEventListener('load',()=>{ const h=location.hash; if(h){ const el=document.querySelector(h); if(el) setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'start'}),200); const m={'#education':'eduF','#experience':'expF','#projects':'projF','#awards':'awdF','#languages':'langF'}; const fid=m[h]; if(fid) setTimeout(()=>document.getElementById(fid).style.display='block',400); } });
+</script>
+{% endblock %}

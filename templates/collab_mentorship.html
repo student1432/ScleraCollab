@@ -1,0 +1,700 @@
+{% extends "collab_base.html" %}
+
+{% block title %}Mentorship - ScleraCollab{% endblock %}
+
+{% block head %}
+<script>
+const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-white mb-2">Mentorship</h1>
+    <p class="text-gray-400">Connect with mentors and offer guidance to others in your field</p>
+  </div>
+
+  <!-- Mentorship Options -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <!-- Find a Mentor -->
+    <div class="island p-6">
+      <div class="flex items-center space-x-3 mb-4">
+        <div class="w-12 h-12 bg-blue-500/20 rounded-full flex items-center justify-center">
+          <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-xl font-semibold text-white">Find a Mentor</h2>
+          <p class="text-gray-400 text-sm">Get guidance from experienced professionals</p>
+        </div>
+      </div>
+      
+      <p class="text-gray-300 mb-4">Connect with mentors who can help you navigate your career path, develop new skills, and achieve your goals.</p>
+      
+      <div class="space-y-3 mb-4">
+        <div class="flex items-center space-x-2 text-gray-400">
+          <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span class="text-sm">Career guidance and advice</span>
+        </div>
+        <div class="flex items-center space-x-2 text-gray-400">
+          <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span class="text-sm">Skill development and learning</span>
+        </div>
+        <div class="flex items-center space-x-2 text-gray-400">
+          <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span class="text-sm">Networking opportunities</span>
+        </div>
+      </div>
+      
+      <button onclick="showMentorSearch()" class="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">
+        Find Mentors
+      </button>
+    </div>
+
+    <!-- Become a Mentor -->
+    <div class="island p-6">
+      <div class="flex items-center space-x-3 mb-4">
+        <div class="w-12 h-12 bg-[#22c55e]/20 rounded-full flex items-center justify-center">
+          <svg class="w-6 h-6 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-xl font-semibold text-white">Become a Mentor</h2>
+          <p class="text-gray-400 text-sm">Share your knowledge and help others grow</p>
+        </div>
+      </div>
+      
+      <p class="text-gray-300 mb-4">Share your experience and expertise to help the next generation of professionals achieve their potential.</p>
+      
+      <div class="space-y-3 mb-4">
+        <div class="flex items-center space-x-2 text-gray-400">
+          <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span class="text-sm">Build your leadership skills</span>
+        </div>
+        <div class="flex items-center space-x-2 text-gray-400">
+          <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span class="text-sm">Expand your network</span>
+        </div>
+        <div class="flex items-center space-x-2 text-gray-400">
+          <svg class="w-4 h-4 text-[#22c55e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span class="text-sm">Give back to the community</span>
+        </div>
+      </div>
+      
+      <button onclick="showMenteeSearch()" class="w-full px-4 py-2 bg-[#22c55e] hover:bg-[#2ea844] text-white rounded-lg transition-colors">
+        Find Mentees
+      </button>
+    </div>
+  </div>
+  
+  <!-- Become a Mentor Section -->
+  <!-- <div class="island p-6">
+    <h2 class="text-xl font-semibold text-white mb-4">Become a Mentor</h2>
+    <p class="text-gray-400 mb-6">Share your expertise and help others achieve their goals. Enable mentorship in your profile to start receiving requests.</p>
+    <div class="text-center">
+      <button onclick="window.location.href='/profile/edit#mentorship'" class="px-6 py-3 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-lg transition-colors">
+        Enable Mentorship
+      </button>
+    </div>
+  </div> -->
+
+  <!-- Current Mentorship Relationships -->
+  <div class="island p-6">
+    <h2 class="text-xl font-semibold text-white mb-4">Your Mentorship Relationships</h2>
+    
+    <div id="mentorshipRelationships">
+      <div class="flex items-center justify-center py-8">
+        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[#22c55e]"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mentor Search Modal -->
+<div id="mentorSearchModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+  <div class="island max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-xl font-semibold text-white">Find a Mentor</h3>
+        <button onclick="closeMentorSearch()" class="text-gray-400 hover:text-white">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="mb-4">
+        <input type="text" 
+               id="mentorSearchQuery" 
+               placeholder="Search for mentors by expertise, industry, or skills..." 
+               class="w-full bg-[#2a2a2a] text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none placeholder-gray-500">
+      </div>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+        <select class="bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="">All Industries</option>
+          <option value="technology">Technology</option>
+          <option value="business">Business</option>
+          <option value="design">Design</option>
+          <option value="marketing">Marketing</option>
+          <option value="finance">Finance</option>
+        </select>
+        
+        <select class="bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="">Experience Level</option>
+          <option value="5-10">5-10 years</option>
+          <option value="10-15">10-15 years</option>
+          <option value="15+">15+ years</option>
+        </select>
+      </div>
+      
+      <div id="mentorSearchResults">
+        <!-- Results will be loaded here -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mentorship Request Modal -->
+<div id="mentorshipRequestModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+  <div class="island max-w-md w-full mx-4">
+    <div class="p-6">
+      <h3 class="text-xl font-semibold text-white mb-4">Send Mentorship Request</h3>
+      
+      <div class="mb-4">
+        <div class="flex items-center space-x-3 mb-4">
+          <img id="requestAvatar" src="" alt="" class="w-12 h-12 rounded-full object-cover">
+          <div>
+            <h4 id="requestName" class="text-white font-medium"></h4>
+            <p id="requestHeadline" class="text-gray-400 text-sm"></p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-gray-400 text-sm mb-2">What would you like help with?</label>
+        <textarea id="mentorshipMessage" rows="4" placeholder="Tell them what you're looking for in a mentorship relationship..." 
+                  class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none resize-none"></textarea>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-gray-400 text-sm mb-2">Time commitment</label>
+        <select id="timeCommitment" class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="casual">Casual (as needed)</option>
+          <option value="monthly">Monthly check-ins</option>
+          <option value="weekly">Weekly meetings</option>
+          <option value="biweekly">Bi-weekly meetings</option>
+        </select>
+      </div>
+      
+      <div class="flex space-x-3">
+        <button onclick="sendMentorshipRequest()" class="flex-1 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">
+          Send Request
+        </button>
+        <button onclick="closeMentorshipRequest()" class="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mentee Search Modal -->
+<div id="menteeSearchModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+  <div class="island max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-xl font-semibold text-white">Find Potential Mentees</h3>
+        <button onclick="closeMenteeSearch()" class="text-gray-400 hover:text-white">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="mb-6">
+        <div class="relative">
+          <input type="text" id="menteeSearchQuery" placeholder="Search by skills, interests, or goals..." 
+                 class="w-full bg-[#2a2a2a] text-white px-4 py-3 pr-10 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none"
+                 onkeyup="if(event.key === 'Enter') loadMenteeSearchResults()">
+          <svg class="absolute right-3 top-3.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+        </div>
+      </div>
+      
+      <div id="menteeSearchResults" class="space-y-4">
+        <!-- Mentee search results will be loaded here -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Mentee Offer Modal -->
+<div id="menteeOfferModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+  <div class="island max-w-md w-full mx-4">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-xl font-semibold text-white">Offer Mentorship</h3>
+        <button onclick="closeMenteeOffer()" class="text-gray-400 hover:text-white">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      
+      <div class="mb-4">
+        <div class="flex items-center space-x-3 mb-4">
+          <div class="relative">
+            <img id="menteeOfferAvatar" src="" alt="" class="w-12 h-12 rounded-full object-cover">
+            <div id="menteeOfferInitials" class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold absolute top-0 left-0">
+              ?
+            </div>
+          </div>
+          <div>
+            <h4 id="menteeOfferName" class="text-white font-medium"></h4>
+            <p class="text-gray-400 text-sm">Potential Mentee</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-gray-400 text-sm mb-2">How can you help them?</label>
+        <textarea id="menteeOfferMessage" rows="4" placeholder="Tell them how you can help as a mentor..." 
+                  class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none resize-none"></textarea>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-gray-400 text-sm mb-2">Time commitment you can offer</label>
+        <select id="menteeTimeCommitment" class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="casual">Casual (as needed)</option>
+          <option value="monthly">Monthly check-ins</option>
+          <option value="weekly">Weekly meetings</option>
+          <option value="biweekly">Bi-weekly meetings</option>
+        </select>
+      </div>
+      
+      <div class="flex space-x-3">
+        <button onclick="sendMenteeOffer()" class="flex-1 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors">
+          Send Offer
+        </button>
+        <button onclick="closeMenteeOffer()" class="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentMentorshipTarget = null;
+let currentMenteeTarget = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadMentorshipRelationships();
+});
+
+function loadMentorshipRelationships() {
+  const container = document.getElementById('mentorshipRelationships');
+  
+  // This would fetch actual mentorship relationships
+  // For now, show a placeholder with user's actual relationships
+  container.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {% if mentorships.as_mentor %}
+      <div class="island p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">🎓 Your Mentees</h3>
+        <div class="space-y-4">
+          {% for mentee in mentorships.as_mentor %}
+          <div class="flex items-center space-x-4 p-4 border border-gray-700 rounded-lg">
+            {% if mentee.profile_picture %}
+            <img src="/static/media/{{ mentee.profile_picture }}" alt="{{ mentee.name }}" 
+                 class="w-12 h-12 rounded-full object-cover">
+            {% else %}
+            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold">
+              {{ mentee.name[0] if mentee.name else '?' }}
+            </div>
+            {% endif %}
+            <div class="flex-1">
+              <div class="font-medium text-white">{{ mentee.name }}</div>
+              <div class="text-sm text-gray-400">{{ mentee.headline }}</div>
+              <div class="text-xs text-gray-500">Connected: {{ mentee.connected_at }}</div>
+            </div>
+            <div class="text-green-400 text-sm">Active</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      
+      {% if mentorships.as_mentee %}
+      <div class="island p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">📚 Your Mentors</h3>
+        <div class="space-y-4">
+          {% for mentor in mentorships.as_mentee %}
+          <div class="flex items-center space-x-4 p-4 border border-gray-700 rounded-lg">
+            {% if mentor.profile_picture %}
+            <img src="/static/media/{{ mentor.profile_picture }}" alt="{{ mentor.name }}" 
+                 class="w-12 h-12 rounded-full object-cover">
+            {% else %}
+            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-blue-600 flex items-center justify-center text-white font-semibold">
+              {{ mentor.name[0] if mentor.name else '?' }}
+            </div>
+            {% endif %}
+            <div class="flex-1">
+              <div class="font-medium text-white">{{ mentor.name }}</div>
+              <div class="text-sm text-gray-400">{{ mentor.headline }}</div>
+              <div class="text-xs text-gray-500">Connected: {{ mentor.connected_at }}</div>
+            </div>
+            <div class="text-blue-400 text-sm">Active</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    
+    {% if not mentorships.as_mentor and not mentorships.as_mentee %}
+    <div class="text-center py-8">
+      <div class="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3 3v2"/>
+          <circle cx="12" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 00-4-4h-2"/>
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-white mb-2">No Active Mentorships</h3>
+      <p class="text-gray-400 mb-6">Start building meaningful mentorship relationships</p>
+      <div class="flex flex-col sm:flex-row gap-3 justify-center">
+        <button onclick="showMentorSearch()" class="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors">
+          Find a Mentor
+        </button>
+        <button onclick="showMenteeSearch()" class="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors">
+          Become a Mentor
+        </button>
+      </div>
+    {% endif %}
+  `;
+}
+
+function showMentorSearch() {
+  document.getElementById('mentorSearchModal').classList.remove('hidden');
+  document.getElementById('mentorSearchModal').classList.add('flex');
+  document.getElementById('mentorSearchQuery').value = '';
+  loadMentorSearchResults();
+}
+
+function showMenteeSearch() {
+  // Show modal to find potential mentees
+  document.getElementById('menteeSearchModal').classList.remove('hidden');
+  document.getElementById('menteeSearchModal').classList.add('flex');
+  document.getElementById('menteeSearchQuery').value = '';
+  loadMenteeSearchResults();
+}
+
+function closeMentorSearch() {
+  document.getElementById('mentorSearchModal').classList.add('hidden');
+  document.getElementById('mentorSearchModal').classList.remove('flex');
+}
+
+function closeMenteeSearch() {
+  document.getElementById('menteeSearchModal').classList.add('hidden');
+  document.getElementById('menteeSearchModal').classList.remove('flex');
+}
+
+function loadMenteeSearchResults() {
+  const container = document.getElementById('menteeSearchResults');
+  const query = document.getElementById('menteeSearchQuery').value;
+  
+  // Show loading state
+  container.innerHTML = `
+    <div class="flex items-center justify-center py-8">
+      <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-green-500"></div>
+    </div>
+  `;
+  
+  // Search for potential mentees (users who might want mentorship)
+  const searchUrl = query ? `/api/collab/search?q=${encodeURIComponent(query)}` : '/api/collab/suggestions';
+  
+  fetch(searchUrl)
+    .then(response => response.json())
+    .then(data => {
+      const people = data.results || data.suggestions || [];
+      
+      if (people.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8">
+            <p class="text-gray-400">No potential mentees found. Try adjusting your search.</p>
+          </div>
+        `;
+        return;
+      }
+      
+      // Filter out existing mentorship connections and mentors
+      const filteredPeople = people.filter(person => {
+        // TODO: Filter out existing connections and current mentors
+        return true;
+      });
+      
+      container.innerHTML = filteredPeople.map(person => `
+        <div class="flex items-center justify-between p-4 border border-gray-700 rounded-lg hover:border-gray-600 transition-colors">
+          <div class="flex items-center space-x-4">
+            ${person.profile_picture ? 
+              `<img src="/static/media/${person.profile_picture}" alt="${person.name}" class="w-12 h-12 rounded-full object-cover">` :
+              `<div class="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold">
+                ${person.name ? person.name[0] : '?'}
+              </div>`
+            }
+            <div>
+              <div class="font-medium text-white">${person.name}</div>
+              <div class="text-sm text-gray-400">${person.headline || 'No headline'}</div>
+              ${person.mutual_connections > 0 ? 
+                `<div class="text-xs text-gray-500">${person.mutual_connections} mutual connection${person.mutual_connections > 1 ? 's' : ''}</div>` : ''
+              }
+            </div>
+          </div>
+          <button onclick="openMenteeOffer('${person.uid}', '${person.name}', '${person.profile_picture || ''}')" 
+                  class="px-3 py-2 bg-green-500 hover:bg-green-600 text-white text-sm rounded-lg transition-colors">
+            Offer Mentorship
+          </button>
+        </div>
+      `).join('');
+    })
+    .catch(error => {
+      console.error('Error loading mentee search results:', error);
+      container.innerHTML = `
+        <div class="text-center py-8">
+          <p class="text-red-400">Error loading results. Please try again.</p>
+        </div>
+      `;
+    });
+}
+
+function openMenteeOffer(menteeUid, menteeName, menteePicture) {
+  currentMenteeTarget = menteeUid;
+  
+  // Update modal content with mentee info
+  document.getElementById('menteeOfferName').textContent = menteeName;
+  document.getElementById('menteeOfferAvatar').src = menteePicture ? `/static/media/${menteePicture}` : '';
+  document.getElementById('menteeOfferAvatar').style.display = menteePicture ? 'block' : 'none';
+  document.getElementById('menteeOfferInitials').textContent = menteeName ? menteeName[0] : '?';
+  document.getElementById('menteeOfferInitials').style.display = menteePicture ? 'none' : 'flex';
+  
+  // Show the modal
+  document.getElementById('menteeOfferModal').classList.remove('hidden');
+  document.getElementById('menteeOfferModal').classList.add('flex');
+}
+
+function closeMenteeOffer() {
+  document.getElementById('menteeOfferModal').classList.add('hidden');
+  document.getElementById('menteeOfferModal').classList.remove('flex');
+  currentMenteeTarget = null;
+}
+
+function sendMenteeOffer() {
+  if (!currentMenteeTarget) return;
+  
+  const message = document.getElementById('menteeOfferMessage').value.trim();
+  const timeCommitment = document.getElementById('menteeTimeCommitment').value;
+  
+  if (!message) {
+    alert('Please tell them how you can help as a mentor.');
+    return;
+  }
+  
+  const fullMessage = `I can help you with mentorship!\n\nTime commitment: ${timeCommitment}\n\n${message}`;
+  
+  // Send mentorship request (but from mentor to mentee perspective)
+  fetch('/api/collab/mentorship/request', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to_uid: currentMenteeTarget,
+      type: 'mentor',
+      message: fullMessage
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      closeMenteeOffer();
+      closeMenteeSearch();
+      alert('Mentorship offer sent successfully!');
+      loadMentorshipRelationships();
+    } else {
+      alert(data.error || 'Failed to send mentorship offer');
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('Failed to send mentorship offer');
+  });
+}
+
+function loadMentorSearchResults() {
+  const container = document.getElementById('mentorSearchResults');
+  const query = document.getElementById('mentorSearchQuery').value;
+  
+  // Show loading state
+  container.innerHTML = `
+    <div class="flex items-center justify-center py-8">
+      <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+    </div>
+  `;
+  
+  // Search for potential mentors
+  const searchUrl = query ? `/api/collab/search?q=${encodeURIComponent(query)}` : '/api/collab/mentorship/suggestions';
+  
+  fetch(searchUrl)
+    .then(response => response.json())
+    .then(data => {
+      const people = data.results || data.suggestions || [];
+      
+      if (people.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8">
+            <p class="text-gray-400">No mentors found. Try adjusting your search.</p>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = people.map(person => `
+        <div class="border border-gray-700 rounded-lg p-4 mb-3 hover:border-blue-500 transition-colors">
+          <div class="flex items-start space-x-3">
+            ${person.profile_picture ? 
+              `<img src="/static/media/${person.profile_picture}" alt="${person.name}" class="w-12 h-12 rounded-full object-cover">` :
+              `<div class="w-12 h-12 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-semibold">${person.name[0] || '?'}</div>`
+            }
+            
+            <div class="flex-1 min-w-0">
+              <h4 class="text-white font-medium">${person.name}</h4>
+              <p class="text-gray-400 text-sm">${person.headline}</p>
+              
+              ${person.skills && person.skills.length > 0 ? `
+                <div class="flex flex-wrap gap-1 mt-2">
+                  ${person.skills.slice(0, 3).map(skill => `
+                    <span class="inline-block px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full">
+                      ${skill.name || skill}
+                    </span>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+            
+            <button onclick="openMentorshipRequest('${person.uid}', '${person.name}', '${person.headline}', '${person.profile_picture || ''}')" 
+                    class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg transition-colors">
+              Request Mentorship
+            </button>
+          </div>
+        </div>
+      `).join('');
+    })
+    .catch(error => {
+      console.error('Error searching mentors:', error);
+      container.innerHTML = `
+        <div class="text-center py-8">
+          <p class="text-red-400">Failed to load mentors. Please try again.</p>
+        </div>
+      `;
+    });
+}
+
+function openMentorshipRequest(uid, name, headline, profilePicture) {
+  currentMentorshipTarget = uid;
+  document.getElementById('requestName').textContent = name;
+  document.getElementById('requestHeadline').textContent = headline;
+  document.getElementById('requestAvatar').src = profilePicture ? `/static/media/${profilePicture}` : '';
+  document.getElementById('requestAvatar').alt = name;
+  document.getElementById('mentorshipMessage').value = '';
+  document.getElementById('timeCommitment').value = 'monthly';
+  
+  document.getElementById('mentorshipRequestModal').classList.remove('hidden');
+  document.getElementById('mentorshipRequestModal').classList.add('flex');
+}
+
+function closeMentorshipRequest() {
+  document.getElementById('mentorshipRequestModal').classList.add('hidden');
+  document.getElementById('mentorshipRequestModal').classList.remove('flex');
+  currentMentorshipTarget = null;
+}
+
+function sendMentorshipRequest() {
+  if (!currentMentorshipTarget) return;
+  
+  const message = document.getElementById('mentorshipMessage').value.trim();
+  const timeCommitment = document.getElementById('timeCommitment').value;
+  
+  if (!message) {
+    alert('Please tell them what you\'re looking for in a mentorship relationship.');
+    return;
+  }
+  
+  const fullMessage = `Time commitment: ${timeCommitment}\n\n${message}`;
+  
+  fetch('/api/collab/mentorship/request', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to_uid: currentMentorshipTarget,
+      type: 'mentor',
+      message: fullMessage
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      closeMentorshipRequest();
+      closeMentorSearch();
+      alert('Mentorship request sent successfully!');
+      loadMentorshipRelationships();
+    } else {
+      alert(data.error || 'Failed to send mentorship request');
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('Failed to send mentorship request');
+  });
+}
+
+// Search as user types
+document.getElementById('mentorSearchQuery').addEventListener('input', function() {
+  clearTimeout(this.searchTimeout);
+  this.searchTimeout = setTimeout(loadMentorSearchResults, 300);
+});
+
+// Close modals when clicking outside
+document.getElementById('mentorSearchModal').addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeMentorSearch();
+  }
+});
+
+document.getElementById('mentorshipRequestModal').addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeMentorshipRequest();
+  }
+});
+</script>
+{% endblock %}

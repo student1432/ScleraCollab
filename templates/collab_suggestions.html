@@ -1,0 +1,339 @@
+{% extends "collab_base.html" %}
+
+{% block title %}People You May Know - ScleraCollab{% endblock %}
+
+{% block head %}
+<script>
+const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-white mb-2">People You May Know</h1>
+    <p class="text-gray-400">Discover and connect with people based on your profile and network</p>
+  </div>
+
+  <!-- Filter Options -->
+  <div class="island p-4 mb-6">
+    <div class="flex flex-wrap gap-4 items-center">
+      <div class="flex items-center space-x-2">
+        <label class="text-gray-400 text-sm">Sort by:</label>
+        <select id="sortSelect" onchange="sortSuggestions()" class="bg-[#2a2a2a] text-white px-3 py-1 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="score">Relevance</option>
+          <option value="mutual">Mutual Connections</option>
+          <option value="name">Name</option>
+        </select>
+      </div>
+      
+      <div class="flex items-center space-x-2">
+        <label class="text-gray-400 text-sm">Show:</label>
+        <select id="filterSelect" onchange="filterSuggestions()" class="bg-[#2a2a2a] text-white px-3 py-1 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="all">All Suggestions</option>
+          <option value="school">Same School</option>
+          <option value="skills">Shared Skills</option>
+          <option value="mutual">Mutual Connections</option>
+        </select>
+      </div>
+      
+      <button onclick="refreshSuggestions()" class="px-3 py-1 bg-[#22c55e] hover:bg-[#2ea844] text-white text-sm rounded-lg transition-colors flex items-center space-x-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        </svg>
+        <span>Refresh</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Suggestions Grid -->
+  <div id="suggestionsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- Loading state -->
+    <div class="col-span-full flex items-center justify-center py-12">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[#22c55e]"></div>
+    </div>
+  </div>
+
+  <!-- No Suggestions State -->
+  <div id="noSuggestions" class="hidden">
+    <div class="island p-12 text-center">
+      <div class="w-20 h-20 bg-[#2a2a2a] rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg class="w-10 h-10 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+        </svg>
+      </div>
+      <h3 class="text-xl font-semibold text-white mb-2">No Suggestions Available</h3>
+      <p class="text-gray-400 mb-6">We couldn't find any suggestions for you right now. Try adding more details to your profile to get better recommendations.</p>
+      <div class="flex flex-col sm:flex-row gap-3 justify-center">
+        <a href="{{ url_for('profile_edit_page') }}" class="inline-flex items-center px-4 py-2 bg-[#22c55e] hover:bg-[#2ea844] text-white rounded-lg transition-colors">
+          Complete Profile
+        </a>
+        <a href="{{ url_for('search_page') }}" class="inline-flex items-center px-4 py-2 bg-[#2a2a2a] hover:bg-[#333] text-white rounded-lg transition-colors">
+          Search People
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Connection Request Modal -->
+<div id="connectionModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+  <div class="island max-w-md w-full mx-4">
+    <div class="p-6">
+      <h3 class="text-xl font-semibold text-white mb-4">Send Connection Request</h3>
+      <div class="mb-4">
+        <div class="flex items-center space-x-3 mb-4">
+          <img id="modalAvatar" src="" alt="" class="w-12 h-12 rounded-full object-cover">
+          <div>
+            <h4 id="modalName" class="text-white font-medium"></h4>
+            <p id="modalHeadline" class="text-gray-400 text-sm"></p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="mb-4">
+        <label class="block text-gray-400 text-sm mb-2">Connection Type</label>
+        <select id="connectionType" class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none">
+          <option value="peer">Peer Connection</option>
+          <option value="mentor">Request Mentorship</option>
+          <option value="mentee">Offer Mentorship</option>
+        </select>
+      </div>
+      
+      <div class="mb-6">
+        <label class="block text-gray-400 text-sm mb-2">Message (optional)</label>
+        <textarea id="connectionMessage" rows="3" placeholder="Add a personal message..." 
+                  class="w-full bg-[#2a2a2a] text-white px-3 py-2 rounded-lg border border-gray-600 focus:border-[#22c55e] focus:outline-none resize-none"></textarea>
+      </div>
+      
+      <div class="flex space-x-3">
+        <button onclick="sendConnectionRequest()" class="flex-1 px-4 py-2 bg-[#22c55e] hover:bg-[#2ea844] text-white rounded-lg transition-colors">
+          Send Request
+        </button>
+        <button onclick="closeConnectionModal()" class="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let allSuggestions = [];
+let currentUid = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadSuggestions();
+});
+
+function loadSuggestions() {
+  const grid = document.getElementById('suggestionsGrid');
+  const noSuggestions = document.getElementById('noSuggestions');
+  
+  // Show loading state
+  grid.innerHTML = `
+    <div class="col-span-full flex items-center justify-center py-12">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[#22c55e]"></div>
+    </div>
+  `;
+  noSuggestions.classList.add('hidden');
+  
+  fetch('/api/collab/suggestions')
+    .then(response => response.json())
+    .then(data => {
+      allSuggestions = data.suggestions || [];
+      
+      if (allSuggestions.length === 0) {
+        grid.classList.add('hidden');
+        noSuggestions.classList.remove('hidden');
+      } else {
+        grid.classList.remove('hidden');
+        noSuggestions.classList.add('hidden');
+        displaySuggestions(allSuggestions);
+      }
+    })
+    .catch(error => {
+      console.error('Error loading suggestions:', error);
+      grid.innerHTML = `
+        <div class="col-span-full island p-8 text-center">
+          <p class="text-red-400">Failed to load suggestions. Please try again.</p>
+        </div>
+      `;
+    });
+}
+
+function displaySuggestions(suggestions) {
+  const grid = document.getElementById('suggestionsGrid');
+  
+  grid.innerHTML = suggestions.map(person => `
+    <div class="island p-6 hover:border-[#22c55e] transition-all duration-200">
+      <div class="flex items-start space-x-4 mb-4">
+        <div class="relative">
+          ${person.profile_picture ? 
+            `<img src="/static/media/${person.profile_picture}" alt="${person.name}" class="w-16 h-16 rounded-full object-cover border-2 border-gray-600">` :
+            `<div class="w-16 h-16 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-semibold text-xl border-2 border-gray-600">${person.name[0] || '?'}</div>`
+          }
+          ${person.mutual_connections > 0 ? 
+            `<div class="absolute -top-1 -right-1 w-5 h-5 bg-[#22c55e] rounded-full flex items-center justify-center text-xs text-white font-semibold border-2 border-[#1a1a1a]">${person.mutual_connections}</div>` : ''
+          }
+        </div>
+        
+        <div class="flex-1 min-w-0">
+          <h3 class="text-white font-semibold truncate">${person.name}</h3>
+          <p class="text-gray-400 text-sm truncate mb-2">${person.headline}</p>
+          
+          ${person.reasons && person.reasons.length > 0 ? `
+            <div class="flex flex-wrap gap-1">
+              ${person.reasons.map(reason => `
+                <span class="inline-block px-2 py-1 bg-[#22c55e]/20 text-[#22c55e] text-xs rounded-full">
+                  ${reason}
+                </span>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+      
+      <div class="flex space-x-2">
+        <button onclick="openConnectionModal('${person.uid}', '${person.name}', '${person.headline}', '${person.profile_picture || ''}')" 
+                class="flex-1 px-3 py-1.5 bg-[#22c55e] hover:bg-[#2ea844] text-white text-sm rounded-lg transition-colors">
+          Connect
+        </button>
+        <button onclick="followUser('${person.uid}', '${person.name}')" 
+                class="px-3 py-1.5 bg-[#2a2a2a] hover:bg-[#333] text-white text-sm rounded-lg transition-colors">
+          Follow
+        </button>
+        <a href="{{ url_for('profile_view', uid='') }}${person.uid}" 
+           class="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-white text-sm rounded-lg transition-colors">
+          View
+        </a>
+      </div>
+    </div>
+  `).join('');
+}
+
+function sortSuggestions() {
+  const sortBy = document.getElementById('sortSelect').value;
+  let sorted = [...allSuggestions];
+  
+  switch(sortBy) {
+    case 'score':
+      sorted.sort((a, b) => b.score - a.score);
+      break;
+    case 'mutual':
+      sorted.sort((a, b) => (b.mutual_connections || 0) - (a.mutual_connections || 0));
+      break;
+    case 'name':
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
+      break;
+  }
+  
+  displaySuggestions(sorted);
+}
+
+function filterSuggestions() {
+  const filterBy = document.getElementById('filterSelect').value;
+  let filtered = [...allSuggestions];
+  
+  if (filterBy !== 'all') {
+    filtered = filtered.filter(person => {
+      const reasons = person.reasons || [];
+      switch(filterBy) {
+        case 'school':
+          return reasons.some(reason => reason.toLowerCase().includes('school'));
+        case 'skills':
+          return reasons.some(reason => reason.toLowerCase().includes('skill'));
+        case 'mutual':
+          return (person.mutual_connections || 0) > 0;
+        default:
+          return true;
+      }
+    });
+  }
+  
+  displaySuggestions(filtered);
+}
+
+function refreshSuggestions() {
+  loadSuggestions();
+}
+
+function openConnectionModal(uid, name, headline, profilePicture) {
+  currentUid = uid;
+  document.getElementById('modalName').textContent = name;
+  document.getElementById('modalHeadline').textContent = headline;
+  document.getElementById('modalAvatar').src = profilePicture ? `/static/media/${profilePicture}` : '';
+  document.getElementById('modalAvatar').alt = name;
+  document.getElementById('connectionMessage').value = '';
+  document.getElementById('connectionType').value = 'peer';
+  
+  document.getElementById('connectionModal').classList.remove('hidden');
+  document.getElementById('connectionModal').classList.add('flex');
+}
+
+function closeConnectionModal() {
+  document.getElementById('connectionModal').classList.add('hidden');
+  document.getElementById('connectionModal').classList.remove('flex');
+  currentUid = null;
+}
+
+function sendConnectionRequest() {
+  if (!currentUid) return;
+  
+  const type = document.getElementById('connectionType').value;
+  const message = document.getElementById('connectionMessage').value;
+  
+  fetch('/api/collab/connections/send', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      to_uid: currentUid,
+      type: type,
+      message: message
+    })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      closeConnectionModal();
+      alert('Connection request sent successfully!');
+      loadSuggestions(); // Refresh to remove this person from suggestions
+    } else {
+      alert(data.error || 'Failed to send connection request');
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('Failed to send connection request');
+  });
+}
+
+function followUser(uid, name) {
+  fetch(`/api/collab/follow/${uid}`, {
+    method: 'POST'
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.success) {
+      alert(`You are now following ${name}!`);
+    } else {
+      alert(data.error || 'Failed to follow user');
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('Failed to follow user');
+  });
+}
+
+// Close modal when clicking outside
+document.getElementById('connectionModal').addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeConnectionModal();
+  }
+});
+</script>
+{% endblock %}

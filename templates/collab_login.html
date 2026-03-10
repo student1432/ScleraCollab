@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — ScleraCollab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --accent: #22c55e; --accent-dim: rgba(34,197,94,0.12);
+      --blue: #3b82f6; --red: #ef4444;
+    }
+    [data-theme="dark"] {
+      --bg: #0d0d0d; --island: #161616; --border: rgba(255,255,255,0.07);
+      --text: #f5f5f5; --muted: #71717a; --input: #1a1a1a; --input-b: rgba(255,255,255,0.1);
+    }
+    [data-theme="light"] {
+      --bg: #f0f0ef; --island: rgba(255,255,255,0.95); --border: rgba(0,0,0,0.08);
+      --text: #111; --muted: #6b7280; --input: #fff; --input-b: rgba(0,0,0,0.12);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Sora', sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 1rem; -webkit-font-smoothing: antialiased;
+    }
+
+    /* animated background dots */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: -1;
+      background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
+      background-size: 28px 28px;
+    }
+
+    .card {
+      width: 100%; max-width: 420px;
+      background: var(--island);
+      border: 1px solid var(--border);
+      border-radius: 1.5rem;
+      padding: 2.5rem 2rem;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+
+    .brand {
+      text-align: center; margin-bottom: 2rem;
+    }
+    .brand-name {
+      font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em;
+    }
+    .brand-name span { color: var(--accent); }
+    .brand-tagline { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+    .label { font-size: 0.78rem; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+
+    .input-wrap { position: relative; }
+    .input {
+      width: 100%; background: var(--input); border: 1px solid var(--input-b);
+      border-radius: 0.75rem; padding: 0.7rem 0.9rem; color: var(--text);
+      font-size: 0.875rem; font-family: 'Sora', sans-serif; outline: none;
+      transition: border-color 0.15s;
+    }
+    .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+    .input::placeholder { color: var(--muted); }
+    .input-icon {
+      position: absolute; left: 0.9rem; top: 50%; transform: translateY(-50%);
+      color: var(--muted); pointer-events: none;
+    }
+    .input.has-icon { padding-left: 2.5rem; }
+
+    .pwd-toggle {
+      position: absolute; right: 0.9rem; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: var(--muted); cursor: pointer; padding: 0;
+    }
+    .pwd-toggle:hover { color: var(--text); }
+
+    .btn {
+      width: 100%; padding: 0.75rem; border-radius: 9999px;
+      font-size: 0.9rem; font-weight: 700; cursor: pointer; border: none;
+      font-family: 'Sora', sans-serif; transition: all 0.15s;
+    }
+    .btn-primary { background: var(--accent); color: #000; }
+    .btn-primary:hover { filter: brightness(1.08); }
+
+    .divider-text {
+      display: flex; align-items: center; gap: 0.75rem;
+      color: var(--muted); font-size: 0.76rem; margin: 1.25rem 0;
+    }
+    .divider-text::before, .divider-text::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+
+    .link { color: var(--accent); text-decoration: none; font-weight: 600; }
+    .link:hover { filter: brightness(1.15); }
+
+    .flash { padding: 0.65rem 1rem; border-radius: 0.75rem; font-size: 0.82rem; font-weight: 500; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    .flash-error { background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+    .flash-info  { background: rgba(59,130,246,0.1); color: var(--blue); border: 1px solid rgba(59,130,246,0.25); }
+
+    .theme-btn {
+      position: fixed; top: 1rem; right: 1rem;
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--island); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+<button class="theme-btn" id="themeBtn" title="Toggle theme">
+  <svg id="iconDark" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+  </svg>
+  <svg id="iconLight" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="display:none;">
+    <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+    <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+  </svg>
+</button>
+
+<div class="card">
+  <div class="brand">
+    <div class="brand-name">Sclera<span>Collab</span></div>
+    <div class="brand-tagline">The student professional network</div>
+  </div>
+
+  <!-- Flash messages -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="flash flash-{{ cat }}">
+      {{ '✕' if cat == 'error' else 'ℹ' }} {{ msg }}
+    </div>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="post">
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+
+    <div class="form-group">
+      <label class="label" for="email">Email address</label>
+      <div class="input-wrap">
+        <svg class="input-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+        </svg>
+        <input class="input has-icon" type="email" id="email" name="email"
+               placeholder="you@example.com" required autocomplete="email">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="label" for="password">Password</label>
+      <div class="input-wrap">
+        <svg class="input-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        <input class="input has-icon" type="password" id="password" name="password"
+               placeholder="••••••••" required autocomplete="current-password" style="padding-right:2.8rem;">
+        <button type="button" class="pwd-toggle" onclick="togglePwd('password', this)" tabindex="-1">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">Sign In</button>
+  </form>
+
+  <div class="divider-text">or</div>
+
+  <div style="text-align:center;font-size:0.84rem;color:var(--muted);">
+    Don't have an account?
+    <a href="{{ url_for('register') }}" class="link">Create one free</a>
+  </div>
+</div>
+
+<script>
+const html = document.documentElement;
+const saved = localStorage.getItem('sc_theme') || 'dark';
+html.setAttribute('data-theme', saved);
+setIcons(saved);
+document.getElementById('themeBtn').onclick = () => {
+  const n = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', n);
+  localStorage.setItem('sc_theme', n);
+  setIcons(n);
+};
+function setIcons(t) {
+  document.getElementById('iconDark').style.display  = t === 'dark'  ? '' : 'none';
+  document.getElementById('iconLight').style.display = t === 'light' ? '' : 'none';
+}
+function togglePwd(id, btn) {
+  const inp = document.getElementById(id);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+</script>
+</body>
+</html>
