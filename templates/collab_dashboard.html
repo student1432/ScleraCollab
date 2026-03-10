@@ -4,12 +4,38 @@
 {% block head %}
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
-const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+  const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
+  
+  // Log initial cache information from server-side rendering
+  document.addEventListener('DOMContentLoaded', function() {
+    const algorithmInfoScript = document.getElementById('algorithm-info-data');
+    if (algorithmInfoScript && typeof logCacheInfo === 'function') {
+      try {
+        const algorithmInfo = JSON.parse(algorithmInfoScript.textContent);
+        console.log('Parsed algorithm info from script tag:', algorithmInfo);
+        
+        const initialCacheData = {
+          algorithm_info: algorithmInfo
+        };
+        logCacheInfo(initialCacheData, 'INITIAL_LOAD');
+      } catch (e) {
+        console.error('Error parsing initial cache data from script tag:', e);
+        console.log('Raw script content:', algorithmInfoScript.textContent);
+      }
+    } else {
+      console.log('No algorithm info script tag found - likely using fallback feed');
+    }
+  });
 </script>
 {% endblock %}
 
 {% block content %}
 <div class="page">
+  {% if algorithm_info and algorithm_info != {} %}
+  <script type="application/json" id="algorithm-info-data">
+    {{ algorithm_info | tojson }}
+  </script>
+  {% endif %}
   <div class="grid-3">
 
     <!-- LEFT SIDEBAR -->
@@ -116,6 +142,11 @@ const CURRENT_USER_ID = "{{ session.uid if 'uid' in session else '' }}";
 
     <!-- MAIN FEED -->
     <main class="feed-main">
+      <!-- Cache Status Indicator -->
+      <div id="cache-status" style="margin-bottom: 0.5rem; font-size: 0.8rem; color: #666; display: none;">
+        <span id="cache-status-text"></span>
+      </div>
+      
       <!-- Feed Container -->
       <div id="feed-container">
         {% if posts %}
@@ -550,6 +581,45 @@ async function createPost() {
   }
 }
 
+// Log cache information to console
+function logCacheInfo(data, source) {
+  if (data && data.algorithm_info) {
+    const cacheInfo = data.algorithm_info;
+    const cacheHit = cacheInfo.cache_hit;
+    const cacheSource = cacheInfo.cache_source;
+    const timestamp = cacheInfo.cache_timestamp;
+    
+    // Update cache status indicator
+    const statusElement = document.getElementById('cache-status');
+    const statusTextElement = document.getElementById('cache-status-text');
+    
+    if (statusElement && statusTextElement) {
+      if (cacheHit) {
+        console.log(`🟢 CACHE HIT [${source}]: Data served from ${cacheSource}`, {
+          source: cacheSource,
+          timestamp: timestamp,
+          age: timestamp ? Date.now() / 1000 - timestamp : null
+        });
+        statusTextElement.textContent = `🟢 Fast load from ${cacheSource} cache`;
+        statusElement.style.color = '#28a745';
+      } else {
+        console.log(`🔴 CACHE MISS [${source}]: Data computed from ${cacheSource}`, {
+          source: cacheSource,
+          timestamp: timestamp
+        });
+        statusTextElement.textContent = `🔴 Fresh data computed from ${cacheSource}`;
+        statusElement.style.color = '#dc3545';
+      }
+      statusElement.style.display = 'block';
+      
+      // Hide after 3 seconds
+      setTimeout(() => {
+        statusElement.style.display = 'none';
+      }, 3000);
+    }
+  }
+}
+
 // Add post to feed
 function addPostToFeed(post) {
   console.log('Adding post to feed:', post);
@@ -695,6 +765,9 @@ async function loadMorePosts() {
   try {
     const response = await fetch('/api/collab/feed?cursor=' + encodeURIComponent(nextCursor));
     const data = await response.json();
+    
+    // Log cache information
+    logCacheInfo(data, 'LOAD_MORE');
     
     if (data.posts) {
       const feedContainer = document.getElementById('feed-container');

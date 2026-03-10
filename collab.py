@@ -445,11 +445,24 @@ def dashboard():
             posts = feed_data.get('posts', [])
             next_cursor = feed_data.get('next_cursor')
             has_more = feed_data.get('has_more', False)
+            algorithm_info = {
+                'fallback_used': True,
+                'cache_hit': False,
+                'cache_source': 'database_fallback',
+                'cache_timestamp': time.time()
+            }
         except Exception as fallback_error:
             print(f"Error with fallback feed: {fallback_error}")
             posts = []
             next_cursor = None
             has_more = False
+            algorithm_info = {
+                'fallback_used': True,
+                'error': True,
+                'cache_hit': False,
+                'cache_source': 'database_error',
+                'cache_timestamp': time.time()
+            }
 
     # Connections preview for sidebar (fetch up to 4)
     connections_preview = []
@@ -557,7 +570,7 @@ def profile_edit():
 
         elif section in ('education', 'experience', 'projects', 'awards', 'languages'):
             action   = request.form.get('action')
-            entry_id = request.form.get('entry_id', str(uuid.uuid4()))
+            entry_id = str(uuid.uuid4()) if action == 'add' else request.form.get('entry_id', str(uuid.uuid4()))
             items    = profile.get(section, [])
 
             if action in ('add', 'edit'):

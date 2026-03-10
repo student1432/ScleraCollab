@@ -180,7 +180,7 @@
         <div style="display:flex;gap:0.5rem;"><button type="submit" class="btn btn-primary btn-sm">Save</button><button type="button" class="btn btn-ghost btn-sm" onclick="tf('projF')">Cancel</button></div>
       </form>
     </div>
-    {% if profile.projects %}{% for proj in profile.projects %}
+    {% if profile.projects %}{% for proj in profile.projects | reverse %}
     <div class="entry-card">
       <div style="font-size:1.2rem;">🚀</div>
       <div class="entry-body"><div style="font-weight:600;font-size:0.88rem;">{{ proj.title }}</div>{% if proj.tech_stack %}<div class="text-muted" style="font-size:0.76rem;">{{ proj.tech_stack | join(', ') }}</div>{% endif %}{% if proj.link %}<a href="{{ proj.link }}" target="_blank" class="text-accent" style="font-size:0.76rem;">↗ Live demo</a>{% endif %}</div>

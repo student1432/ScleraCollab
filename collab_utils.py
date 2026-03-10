@@ -12,6 +12,7 @@ import bleach
 import re
 import base64
 import json
+import time
 from firebase_config import db
 from firebase_admin import firestore
 import collab_cache
@@ -85,7 +86,7 @@ def get_model():
         try:
             print("🤖 Loading AI model...")
             start_time = time.time()
-            _model = SentenceTransformer('all-MiniLM-L6-v2', timeout=60)
+            _model = SentenceTransformer('all-MiniLM-L6-v2')
             if time.time() - start_time > 30:
                 print("⚠️  AI model loading took longer than expected")
             print("✅ AI Model loaded: all-MiniLM-L6-v2")
@@ -2562,6 +2563,12 @@ def get_personalized_feed(uid: str, limit: int = 20, cursor: str = None) -> dict
     cached_feed = collab_cache.get_feed_cache(uid, cursor or '')
     if cached_feed:
         print(f"✅ Feed served from Redis cache for {uid}")
+        # Add cache hit info for browser console logging
+        if 'algorithm_info' not in cached_feed:
+            cached_feed['algorithm_info'] = {}
+        cached_feed['algorithm_info']['cache_hit'] = True
+        cached_feed['algorithm_info']['cache_source'] = 'redis'
+        cached_feed['algorithm_info']['cache_timestamp'] = time.time()
         return cached_feed
 
     try:
@@ -2812,7 +2819,10 @@ def get_personalized_feed(uid: str, limit: int = 20, cursor: str = None) -> dict
             ]
         }
         cache_result['algorithm_info']['cache_hit'] = False
+        cache_result['algorithm_info']['cache_source'] = 'database'
+        cache_result['algorithm_info']['cache_timestamp'] = time.time()
         collab_cache.set_feed_cache(uid, cursor or '', cache_result)
+        print(f"🔄 Feed computed from database for {uid} (cached to Redis)")
 
         return result
 
