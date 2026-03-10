@@ -14,6 +14,7 @@ from firebase_admin import firestore
 import requests as http_requests
 from datetime import datetime
 import os, uuid, time, json
+from typing import Optional
 from functools import wraps
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
