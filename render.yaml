@@ -19,6 +19,10 @@ services:
         value: 3.9
       - key: SECRET_KEY
         generateValue: true
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_PATH
+        value: ./serviceAccountKey.json
     autoDeploy: true
     
   # Redis Service (for caching)
