@@ -23,12 +23,11 @@ services:
         value: AIzaSyClZdRrPYznaCm-s0xEv3rfJWNnbPSy8Xk
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         generateValue: true
+      - key: REDIS_URL
+        value: ${sclera-collab-redis}
     autoDeploy: true
     
   # Redis Service (for caching)
   - type: redis
     name: sclera-collab-redis
     plan: free
-    envVars:
-      - key: REDIS_URL
-        value: rediss://:funky-oarfish-66348.upstash.io:6380
