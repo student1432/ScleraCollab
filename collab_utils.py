@@ -79,14 +79,19 @@ _embeddings_cache = {}
 _cache_expiry = {}
 
 def get_model():
-    """Get or initialize the sentence transformer model"""
+    """Get or initialize sentence transformer model"""
     global _model
     if _model is None and AI_AVAILABLE:
         try:
-            _model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("🤖 AI Model loaded: all-MiniLM-L6-v2")
+            print("🤖 Loading AI model...")
+            start_time = time.time()
+            _model = SentenceTransformer('all-MiniLM-L6-v2', timeout=60)
+            if time.time() - start_time > 30:
+                print("⚠️  AI model loading took longer than expected")
+            print("✅ AI Model loaded: all-MiniLM-L6-v2")
         except Exception as e:
             print(f"❌ Failed to load AI model: {e}")
+            print("⚠️  Continuing without AI features...")
             _model = None
     return _model
 
