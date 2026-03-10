@@ -63,11 +63,22 @@ def _connect() -> Optional[object]:
         import redis as redis_lib
         url = os.environ.get('REDIS_URL')
         if url:
+            # Handle Render Redis URL format
+            if not url.startswith(('redis://', 'rediss://')):
+                # If it's just a hostname or incomplete URL, construct proper Redis URL
+                if ':' in url and not url.startswith('redis://'):
+                    # Format like 'hostname:port'
+                    url = f'redis://{url}'
+                else:
+                    # Just hostname or service name
+                    url = f'redis://{url}:6379'
+            
+            print(f"Attempting Redis connection to: {url}")
             client = redis_lib.from_url(
                 url,
                 decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2,
+                socket_connect_timeout=5,
+                socket_timeout=5,
             )
         else:
             host = os.environ.get('REDIS_HOST', 'localhost')
@@ -75,8 +86,8 @@ def _connect() -> Optional[object]:
             client = redis_lib.Redis(
                 host=host, port=port, db=0,
                 decode_responses=True,
-                socket_connect_timeout=2,
-                socket_timeout=2,
+                socket_connect_timeout=5,
+                socket_timeout=5,
             )
         client.ping()          # single ping at connection time only
         _redis          = client

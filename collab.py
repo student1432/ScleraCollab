@@ -82,11 +82,15 @@ def default_filter(value, default_value=''):
 # Initialize SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+print("🚀 Starting ScleraCollab application...")
+
 # Probe Redis connection at startup (non-fatal if unavailable)
-collab_cache.probe()
+redis_available = collab_cache.probe()
+print(f"📊 Redis status: {'✅ Available' if redis_available else '⚠️ Unavailable (caching disabled)'}")
 
 # Firebase REST auth endpoint (for email/password sign-in)
 FIREBASE_API_KEY = os.environ.get('FIREBASE_WEB_API_KEY', '')
+print(f"🔥 Firebase API Key configured: {'✅' if FIREBASE_API_KEY else '❌ Missing'}")
 FIREBASE_AUTH_URL = (
     'https://identitytoolkit.googleapis.com/v1/accounts'
 )
@@ -262,6 +266,16 @@ def allowed_image(filename: str) -> bool:
 # ============================================================================
 # AUTH ROUTES  (standalone — own login / register / logout)
 # ============================================================================
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for debugging"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat(),
+        'redis_available': collab_cache.probe()
+    }), 200
+
 
 @app.route('/')
 def index():

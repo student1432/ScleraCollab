@@ -15,27 +15,34 @@ def _init_firebase():
     if firebase_admin._apps:
         return firebase_admin.get_app()
 
-    # Option 1: path to service account JSON file
-    sa_path = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH')
-    if sa_path and os.path.exists(sa_path):
-        cred = credentials.Certificate(sa_path)
+    try:
+        # Option 1: path to service account JSON file
+        sa_path = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH')
+        if sa_path and os.path.exists(sa_path):
+            print(f"Loading Firebase credentials from: {sa_path}")
+            cred = credentials.Certificate(sa_path)
 
-    # Option 2: inline JSON via env var (useful for Railway / Render / Heroku)
-    elif os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON'):
-        sa_dict = json.loads(os.environ['FIREBASE_SERVICE_ACCOUNT_JSON'])
-        cred = credentials.Certificate(sa_dict)
+        # Option 2: inline JSON via env var (useful for Railway / Render / Heroku)
+        elif os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON'):
+            print("Loading Firebase credentials from environment variable")
+            sa_dict = json.loads(os.environ['FIREBASE_SERVICE_ACCOUNT_JSON'])
+            cred = credentials.Certificate(sa_dict)
 
-    else:
-        raise EnvironmentError(
-            "No Firebase credentials found. "
-            "Set FIREBASE_SERVICE_ACCOUNT_PATH or FIREBASE_SERVICE_ACCOUNT_JSON."
-        )
+        else:
+            raise EnvironmentError(
+                "No Firebase credentials found. "
+                "Set FIREBASE_SERVICE_ACCOUNT_PATH or FIREBASE_SERVICE_ACCOUNT_JSON."
+            )
 
-    bucket = os.environ.get('FIREBASE_STORAGE_BUCKET', '')
-    firebase_admin.initialize_app(cred, {
-        'storageBucket': bucket,
-    })
-    return firebase_admin.get_app()
+        bucket = os.environ.get('FIREBASE_STORAGE_BUCKET', '')
+        firebase_admin.initialize_app(cred, {
+            'storageBucket': bucket,
+        })
+        print("✅ Firebase initialized successfully")
+        return firebase_admin.get_app()
+    except Exception as e:
+        print(f"❌ Firebase initialization failed: {e}")
+        raise
 
 
 _init_firebase()
