@@ -20,7 +20,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: FIREBASE_WEB_API_KEY
-        sync: false
+        value: AIzaSyClZdRrPYznaCm-s0xEv3rfJWNnbPSy8Xk
       - key: FIREBASE_SERVICE_ACCOUNT_PATH
         value: ./serviceAccountKey.json
     autoDeploy: true
