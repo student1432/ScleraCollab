@@ -5,13 +5,13 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -k gevent --worker-connections 1000 --bind 0.0.0.0:$PORT collab:app
+    startCommand: gunicorn --worker-class eventlet --worker-connections 1000 --bind 0.0.0.0:$PORT collab:app
     healthCheck:
       enabled: true
-      path: /favicon.ico
+      path: /
       intervalSeconds: 30
       timeoutSeconds: 10
-      gracePeriodSeconds: 60
+      gracePeriodSeconds: 120
     envVars:
       - key: FLASK_ENV
         value: production
